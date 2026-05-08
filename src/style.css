@@ -1,0 +1,17 @@
+body {
+    display: flex !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    overflow: hidden !important;
+}
+
+#root,
+#__next {
+    flex: 1 !important;
+    height: 100% !important;
+    overflow: auto !important;
+    position: relative !important;
+    width: auto !important;
+}
