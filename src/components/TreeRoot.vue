@@ -32,6 +32,8 @@ const createNewFolder = () => {
     state.focusedNode = newFolder;
 };
 
+defineExpose({ createNewFolder });
+
 const onRootDrop = (event) => {
     event.preventDefault();
     isRootDragOver.value = false;
@@ -103,22 +105,15 @@ const onRootDrop = (event) => {
 
     if (newNode) {
         props.model.addChild(newNode);
-        state.focusedNode = newNode;
+        // 只有新创建的节点才改变焦点，拖拽的节点不改变焦点
+        if (!state.draggedNode) {
+            state.focusedNode = newNode;
+        }
     }
 };
 </script>
 
 <template>
-    <div class="bct-header">
-        <div class="bct-logo-container">
-            <img src="../assets/logo.svg" alt="Logo" class="bct-logo" />
-            <span class="bct-title">CHATBOX</span>
-        </div>
-        <button @click="createNewFolder" class="bct-add-btn" title="新建文件夹">
-            <span class="material-icons">create_new_folder</span>
-        </button>
-    </div>
-
     <!-- 文件树组件 -->
     <div style="flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;" @click="state.focusedNode = null">
         <div class="file-tree-container"
@@ -136,56 +131,8 @@ const onRootDrop = (event) => {
 </template>
 
 <style scoped>
-.bct-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid #eee;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-shrink: 0;
-}
-
-.bct-logo-container {
-    height: 24px;
-    display: flex;
-    align-items: center;
-}
-
-.bct-logo {
-    height: 100%;
-}
-
-.bct-title {
-    margin-left: 8px;
-    font-size: 18px;
-    font-weight: 700;
-    color: #1a1a1a;
-    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    letter-spacing: -0.5px;
-}
-
-.bct-add-btn {
-    background: none;
-    border: none;
-    color: #1c64f2;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    padding: 4px;
-    border-radius: 4px;
-    transition: background-color 0.2s;
-}
-
-.bct-add-btn:hover {
-    background-color: rgba(28, 100, 242, 0.1);
-}
-
-.bct-add-btn .material-icons {
-    font-size: 20px;
-}
-
 .file-tree-container {
-    padding: 15px 10px;
+    padding: 12px 8px;
     overflow-y: auto;
     flex-grow: 1;
 }
@@ -227,14 +174,6 @@ const onRootDrop = (event) => {
 }
 
 @media (prefers-color-scheme: dark) {
-    .bct-header {
-        border-bottom-color: #333;
-    }
-
-    .bct-title {
-        color: #eee;
-    }
-
     .file-tree-container.root-drag-over {
         background-color: rgba(59, 130, 246, 0.15);
     }

@@ -5,11 +5,7 @@ export const state = reactive({
     draggedNode: null,
     draggedParent: null,
     focusedNode: null,
-    activeMenuNodeId: null,
-    settings: {
-        skipDeleteConfirm: false
-    },
-    isSettingsOpen: false
+    activeMenuNodeId: null
 });
 
 export function findNodeByUrl(node, url) {

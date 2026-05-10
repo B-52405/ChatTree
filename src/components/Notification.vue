@@ -18,7 +18,7 @@ import { notifications } from '../utils/notify.js';
     top: 20px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 1000000;
+    z-index: 1000001;
     pointer-events: none;
     /* 让鼠标事件能够穿透到下层页面 */
 }

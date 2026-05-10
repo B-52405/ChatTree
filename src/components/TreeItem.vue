@@ -24,8 +24,21 @@ const isFolder = computed(() => {
 const finishEdit = (triggerType = 'blur') => {
     if (props.model.isEditing) {
         let title = props.model.title.trim();
+        
+        // 如果是新建文件夹且名字为空，则取消新建
+        if (isFolder.value && !title) {
+            if (props.parentNode) {
+                props.parentNode.removeChild(props.model);
+                if (state.focusedNode === props.model) {
+                    state.focusedNode = null;
+                }
+            }
+            return;
+        }
+        
+        // 对话节点如果名字为空，则设置默认名字
         if (!title) {
-            title = isFolder.value ? '新建文件夹' : '未命名对话';
+            title = '未命名对话';
         }
         
         // 检查重名 (文件夹和对话)
@@ -40,8 +53,18 @@ const finishEdit = (triggerType = 'blur') => {
                     showNotify(`${isFolder.value ? '文件夹' : '对话'} "${title}" 已存在，请重新命名。`, 'warning');
                     return; // 拒绝修改，保持编辑状态
                 } else {
-                    // 通过转移焦点时触发，回退重命名
-                    title = oldTitle.value || (isFolder.value ? '新建文件夹' : '未命名对话');
+                    const isNewFolder = isFolder.value && oldTitle.value === '';
+                    if (isNewFolder) {
+                        showNotify(`文件夹 "${title}" 已存在，已取消新建。`, 'warning');
+                        if (props.parentNode) {
+                            props.parentNode.removeChild(props.model);
+                            if (state.focusedNode === props.model) {
+                                state.focusedNode = null;
+                            }
+                        }
+                        return;
+                    }
+                    title = oldTitle.value || '未命名对话';
                 }
             }
         }
@@ -237,32 +260,12 @@ const onDrop = (event) => {
         props.parentNode.children.splice(insertIndex, 0, newNode);
     }
     
-    state.focusedNode = newNode; // 拖拽完成后焦点置于新位置的节点
+    // 拖拽完成后不改变焦点
 };
 
 const showMenu = computed(() => state.activeMenuNodeId === props.model.id);
 const menuX = ref(0);
 const menuY = ref(0);
-
-const onContextMenu = (event) => {
-    event.preventDefault();
-    state.focusedNode = props.model;
-    
-    menuX.value = event.clientX;
-    menuY.value = event.clientY;
-    state.activeMenuNodeId = props.model.id;
-
-    const closeMenu = () => {
-        state.activeMenuNodeId = null;
-        document.removeEventListener('click', closeMenu);
-        document.removeEventListener('contextmenu', closeMenu);
-    };
-    
-    setTimeout(() => {
-        document.addEventListener('click', closeMenu);
-        document.addEventListener('contextmenu', closeMenu);
-    }, 0);
-};
 
 const newFolder = () => {
     state.activeMenuNodeId = null;
@@ -281,6 +284,36 @@ const newFolder = () => {
 const renameItem = () => {
     state.activeMenuNodeId = null;
     startEdit();
+};
+
+const onMenuButtonClick = (event) => {
+    event.stopPropagation();
+    state.focusedNode = props.model;
+    
+    const button = event.currentTarget;
+    const rect = button.getBoundingClientRect();
+    menuX.value = rect.right + 5; // 菜单显示在按钮右侧
+    menuY.value = rect.top;
+    state.activeMenuNodeId = props.model.id;
+
+    const closeMenu = () => {
+        state.activeMenuNodeId = null;
+        document.removeEventListener('click', closeMenu);
+    };
+    
+    setTimeout(() => {
+        document.addEventListener('click', closeMenu);
+    }, 0);
+};
+
+const deleteItem = () => {
+    state.activeMenuNodeId = null;
+    if (props.parentNode) {
+        props.parentNode.removeChild(props.model);
+        if (state.focusedNode === props.model) {
+            state.focusedNode = null;
+        }
+    }
 };
 </script>
 
@@ -301,7 +334,6 @@ const renameItem = () => {
              @dragover.stop.prevent="onDragOver" 
              @dragleave.stop="onDragLeave"
              @drop.stop.prevent="onDrop" 
-             @contextmenu.stop="onContextMenu"
              class="tree-item">
             <span v-if="isFolder" class="toggle-icon material-icons">
                 {{ model.isOpen ? 'expand_more' : 'chevron_right' }}
@@ -317,6 +349,9 @@ const renameItem = () => {
                    @keyup.enter="finishEdit('enter')" 
                    @click.stop
                    class="node-input" />
+            <button v-if="!model.isEditing" class="menu-button" @click.stop="onMenuButtonClick" title="菜单">
+                <span class="menu-icon material-icons">more_horiz</span>
+            </button>
         </div>
 
         <ul v-show="model.isOpen" v-if="isFolder" class="tree-list">
@@ -331,6 +366,7 @@ const renameItem = () => {
                     <li @click.stop="newFolder">新建文件夹</li>
                 </template>
                 <li @click.stop="renameItem">重命名</li>
+                <li @click.stop="deleteItem">删除</li>
             </ul>
         </Teleport>
     </li>
@@ -340,11 +376,13 @@ const renameItem = () => {
 .tree-item {
     cursor: pointer;
     user-select: none;
-    padding: 6px 8px;
+    padding: 4px 6px;
     display: flex;
     align-items: center;
     border-radius: 4px;
     font-size: 14px;
+    position: relative;
+    transition: background-color 0.15s;
 }
 
 .tree-item.is-focused {
@@ -372,7 +410,7 @@ const renameItem = () => {
 }
 
 .toggle-icon {
-    width: 20px;
+    width: 18px;
     display: inline-block;
     font-size: 18px;
     color: #999;
@@ -381,7 +419,7 @@ const renameItem = () => {
 }
 
 .icon {
-    margin-right: 6px;
+    margin-right: 4px;
     font-size: 18px;
     flex-shrink: 0;
     color: #666;
@@ -403,8 +441,9 @@ const renameItem = () => {
     flex: 1;
     min-width: 0;
     margin: 0;
-    padding: 0 4px;
+    padding: 0px 4px;
     font-size: 14px;
+    min-height: 25px;
     font-family: inherit;
     border: 1px solid #007acc;
     border-radius: 3px;
@@ -432,14 +471,50 @@ const renameItem = () => {
 
 .tree-list {
     list-style-type: none;
-    padding-left: 16px;
-    margin: 0 0 0 15px;
+    padding-left: 14px;
+    margin: 0 0 0 14px;
     border-left: 1px dashed #dcdcdc;
 }
 
 li {
     margin: 0;
     padding: 0;
+}
+
+/* 菜单按钮相关样式 */
+.menu-button {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    margin-left: 4px;
+    flex-shrink: 0;
+    position: relative;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+.menu-button:hover {
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+.tree-item:hover .menu-button {
+    display: flex;
+}
+
+.menu-icon {
+    font-size: 18px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.menu-button:hover .menu-icon {
+    color: #1c64f2;
 }
 
 .context-menu {
@@ -512,6 +587,18 @@ li {
 
     .flash-highlight {
         animation: flash-border-dark 0.6s ease-in-out 1;
+    }
+
+    .menu-button:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .menu-icon {
+        color: #aaa;
+    }
+
+    .menu-button:hover .menu-icon {
+        color: #3b82f6;
     }
 
     .context-menu {

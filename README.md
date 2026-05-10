@@ -1,4 +1,4 @@
-# CHATTREE (DeepSeek 网页端增强脚本)
+# ChatTree (DeepSeek 网页端增强脚本)
 
 这是一个运行在浏览器中的油猴（Tampermonkey）脚本，旨在为 DeepSeek 网页端提供更强大的自定义 UI，并添加多个实用功能以提升日常工作和开发效率。
 
