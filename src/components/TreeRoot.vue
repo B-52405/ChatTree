@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, watch } from 'vue';
 import TreeItem from './TreeItem.vue';
 import { FolderNode, ChatNode, state, findParent, findNodeByUrl, getAllParents } from '../models/TreeNode.js';
 import { showNotify } from '../utils/notify.js';
@@ -12,6 +12,23 @@ const props = defineProps({
 });
 
 const isRootDragOver = ref(false);
+const treeContainerRef = ref(null);
+
+const clearFocus = () => {
+    state.focusedNode = null;
+    state.focusedNodeDetachedFromUrl = false;
+};
+
+const scrollFocusedNodeIntoView = async (node) => {
+    if (!node) return;
+    await nextTick();
+    const el = treeContainerRef.value?.querySelector(`.tree-item[data-id="${node.id}"]`);
+    if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+};
+
+watch(() => state.focusedNode, scrollFocusedNodeIntoView);
 
 const createNewFolder = () => {
     let targetFolder = props.model;
@@ -30,6 +47,7 @@ const createNewFolder = () => {
     targetFolder.addChild(newFolder);
     targetFolder.isOpen = true; // 确保父文件夹展开
     state.focusedNode = newFolder;
+    state.focusedNodeDetachedFromUrl = false;
 };
 
 defineExpose({ createNewFolder });
@@ -108,6 +126,7 @@ const onRootDrop = (event) => {
         // 只有新创建的节点才改变焦点，拖拽的节点不改变焦点
         if (!state.draggedNode) {
             state.focusedNode = newNode;
+            state.focusedNodeDetachedFromUrl = false;
         }
     }
 };
@@ -115,8 +134,9 @@ const onRootDrop = (event) => {
 
 <template>
     <!-- 文件树组件 -->
-    <div style="flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;" @click="state.focusedNode = null">
+    <div style="flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;" @click="clearFocus">
         <div class="file-tree-container"
+             ref="treeContainerRef"
              @dragover.prevent="isRootDragOver = true"
              @dragleave="isRootDragOver = false"
              @drop="onRootDrop">
@@ -132,9 +152,18 @@ const onRootDrop = (event) => {
 
 <style scoped>
 .file-tree-container {
-    padding: 12px 8px;
+    padding: 12px 8px 64px;
     overflow-y: auto;
     flex-grow: 1;
+}
+
+.file-tree-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.file-tree-container::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.5);
+    border-radius: 999px;
 }
 
 .root-tree {

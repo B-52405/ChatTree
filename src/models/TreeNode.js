@@ -5,6 +5,7 @@ export const state = reactive({
     draggedNode: null,
     draggedParent: null,
     focusedNode: null,
+    focusedNodeDetachedFromUrl: false,
     activeMenuNodeId: null
 });
 

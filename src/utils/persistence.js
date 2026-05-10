@@ -1,4 +1,5 @@
 import { FolderNode, ChatNode } from '../models/TreeNode.js';
+import { defaultSettings } from '../models/AppState.js';
 
 // 反序列化辅助函数
 function reviveNode(data) {
@@ -21,17 +22,33 @@ function createDefaultWorkspace() {
     };
 }
 
+function normalizeSettings(settings = {}, legacySidebarWidth = 335) {
+    const syncServerPort = Number(settings.syncServerPort);
+    return {
+        ...defaultSettings,
+        ...settings,
+        sidebarWidth: Math.max(335, Number(settings.sidebarWidth || legacySidebarWidth || defaultSettings.sidebarWidth)),
+        syncServerPort: Number.isInteger(syncServerPort) && syncServerPort >= 1 && syncServerPort <= 65535
+            ? syncServerPort
+            : defaultSettings.syncServerPort
+    };
+}
+
+export function reviveWorkspace(item, fallbackName = '工作区') {
+    return {
+        id: item.id || `workspace_${Date.now()}`,
+        name: item.name || fallbackName,
+        tree: item.tree ? reviveNode(item.tree) : new FolderNode({ title: 'root', children: [] }),
+        folderPath: item.folderPath || null
+    };
+}
+
 // 加载持久化数据
 export function loadPersistedData() {
     try {
         const saved = GM_getValue('chattree_data', null);
         if (saved && Array.isArray(saved.workspaces) && saved.workspaces.length > 0) {
-            const workspaces = saved.workspaces.map(item => ({
-                id: item.id || `workspace_${Date.now()}`,
-                name: item.name || '工作区',
-                tree: item.tree ? reviveNode(item.tree) : new FolderNode({ title: 'root', children: [] }),
-                folderPath: item.folderPath || null
-            }));
+            const workspaces = saved.workspaces.map(item => reviveWorkspace(item));
 
             const currentWorkspaceId = saved.currentWorkspaceId || workspaces[0].id;
             const currentWorkspace = workspaces.find(workspace => workspace.id === currentWorkspaceId) || workspaces[0];
@@ -40,7 +57,7 @@ export function loadPersistedData() {
                 workspaces,
                 currentWorkspaceId: currentWorkspace.id,
                 tree: currentWorkspace.tree,
-                settings: saved.settings || { skipDeleteConfirm: false, sidebarWidth: 335 },
+                settings: normalizeSettings(saved.settings),
                 sidebarWidth: Math.max(335, (saved.settings && saved.settings.sidebarWidth) || 335)
             };
         }
@@ -52,7 +69,7 @@ export function loadPersistedData() {
                 workspaces: [legacyWorkspace],
                 currentWorkspaceId: legacyWorkspace.id,
                 tree: legacyWorkspace.tree,
-                settings: saved.settings || { skipDeleteConfirm: false, sidebarWidth: 335 },
+                settings: normalizeSettings(saved.settings, saved.sidebarWidth),
                 sidebarWidth: Math.max(335, (saved.settings && saved.settings.sidebarWidth) || saved.sidebarWidth || 335)
             };
         }
@@ -65,7 +82,7 @@ export function loadPersistedData() {
         workspaces: [defaultWorkspace],
         currentWorkspaceId: defaultWorkspace.id,
         tree: defaultWorkspace.tree,
-        settings: { skipDeleteConfirm: false, sidebarWidth: 335 },
+        settings: { ...defaultSettings },
         sidebarWidth: 335
     };
 }

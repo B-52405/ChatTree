@@ -42,17 +42,19 @@
     </div>
     <!-- 工作区选择菜单 -->
     <div v-if="menuOpen" class="workspace-menu-window" :style="menuStyle">
-        <button
-            v-for="workspace in workspaces"
-            :key="workspace.id"
-            class="workspace-menu-item"
-            @click.stop="selectWorkspace(workspace.id)">
-            <div class="workspace-menu-item-inner">
-                <span class="workspace-name-text">{{ workspace.name }}</span>
-                <span v-if="workspace.folderPath" class="workspace-folder-hint">绑定：{{ truncatePath(workspace.folderPath) }}</span>
-            </div>
-            <span v-if="workspace.id === currentWorkspaceId" class="workspace-current-label">当前</span>
-        </button>
+        <div class="workspace-menu-list" :class="{ 'is-scrollable': workspaces.length > 10 }">
+            <button
+                v-for="workspace in workspaces"
+                :key="workspace.id"
+                class="workspace-menu-item"
+                @click.stop="selectWorkspace(workspace.id)">
+                <div class="workspace-menu-item-inner">
+                    <span class="workspace-name-text">{{ workspace.name }}</span>
+                    <span v-if="workspace.folderPath" class="workspace-folder-hint">绑定：{{ truncatePath(workspace.folderPath) }}</span>
+                </div>
+                <span v-if="workspace.id === currentWorkspaceId" class="workspace-current-label">当前</span>
+            </button>
+        </div>
         <div class="workspace-menu-divider"></div>
         <button class="workspace-menu-action" type="button" @click.stop="handleManage">
             <span class="material-icons">manage_accounts</span>
@@ -388,6 +390,20 @@ onUnmounted(() => {
     overflow: hidden;
     z-index: 10000;
     animation: slideUp 0.15s ease-out;
+}
+
+.workspace-menu-list.is-scrollable {
+    max-height: 460px;
+    overflow-y: auto;
+}
+
+.workspace-menu-list.is-scrollable::-webkit-scrollbar {
+    width: 8px;
+}
+
+.workspace-menu-list.is-scrollable::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.5);
+    border-radius: 999px;
 }
 
 @keyframes slideUp {

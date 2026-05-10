@@ -31,6 +31,7 @@ const finishEdit = (triggerType = 'blur') => {
                 props.parentNode.removeChild(props.model);
                 if (state.focusedNode === props.model) {
                     state.focusedNode = null;
+                    state.focusedNodeDetachedFromUrl = false;
                 }
             }
             return;
@@ -60,6 +61,7 @@ const finishEdit = (triggerType = 'blur') => {
                             props.parentNode.removeChild(props.model);
                             if (state.focusedNode === props.model) {
                                 state.focusedNode = null;
+                                state.focusedNodeDetachedFromUrl = false;
                             }
                         }
                         return;
@@ -98,6 +100,7 @@ onMounted(() => {
 
 const toggle = () => {
     state.focusedNode = props.model;
+    state.focusedNodeDetachedFromUrl = false;
 
     if (isFolder.value) {
         props.model.isOpen = !props.model.isOpen;
@@ -279,6 +282,7 @@ const newFolder = () => {
     targetFolder.addChild(newF);
     targetFolder.isOpen = true;
     state.focusedNode = newF;
+    state.focusedNodeDetachedFromUrl = false;
 };
 
 const renameItem = () => {
@@ -289,6 +293,7 @@ const renameItem = () => {
 const onMenuButtonClick = (event) => {
     event.stopPropagation();
     state.focusedNode = props.model;
+    state.focusedNodeDetachedFromUrl = false;
     
     const button = event.currentTarget;
     const rect = button.getBoundingClientRect();
@@ -312,6 +317,7 @@ const deleteItem = () => {
         props.parentNode.removeChild(props.model);
         if (state.focusedNode === props.model) {
             state.focusedNode = null;
+            state.focusedNodeDetachedFromUrl = false;
         }
     }
 };
@@ -324,7 +330,8 @@ const deleteItem = () => {
                  'drag-before': dragPosition === 'before',
                  'drag-into': dragPosition === 'into',
                  'drag-after': dragPosition === 'after',
-                 'is-focused': state.focusedNode === model
+                 'is-focused': state.focusedNode === model,
+                 'is-focused-detached': state.focusedNode === model && state.focusedNodeDetachedFromUrl
              }" 
              :data-id="model.id"
              :draggable="!!parentNode"
@@ -363,10 +370,19 @@ const deleteItem = () => {
         <Teleport to="body">
             <ul v-if="showMenu" class="context-menu" :style="{ top: menuY + 'px', left: menuX + 'px' }">
                 <template v-if="isFolder">
-                    <li @click.stop="newFolder">新建文件夹</li>
+                    <li @click.stop="newFolder">
+                        <span class="material-icons">create_new_folder</span>
+                        <span>新建文件夹</span>
+                    </li>
                 </template>
-                <li @click.stop="renameItem">重命名</li>
-                <li @click.stop="deleteItem">删除</li>
+                <li @click.stop="renameItem">
+                    <span class="material-icons">edit</span>
+                    <span>重命名</span>
+                </li>
+                <li class="context-menu-delete" @click.stop="deleteItem">
+                    <span class="material-icons">delete</span>
+                    <span>删除</span>
+                </li>
             </ul>
         </Teleport>
     </li>
@@ -389,12 +405,20 @@ const deleteItem = () => {
     background-color: #dbeafe; /* 高亮色 */
 }
 
+.tree-item.is-focused-detached {
+    background-color: #e5e7eb;
+}
+
 .tree-item:hover {
     background-color: #e5e5e5;
 }
 
 .tree-item.is-focused:hover {
     background-color: #bfdbfe;
+}
+
+.tree-item.is-focused-detached:hover {
+    background-color: #d1d5db;
 }
 
 @keyframes flash-border {
@@ -428,6 +452,10 @@ const deleteItem = () => {
 .tree-item:hover .icon,
 .tree-item.is-focused .icon {
     color: #1c64f2;
+}
+
+.tree-item.is-focused-detached .icon {
+    color: #6b7280;
 }
 
 .node-title {
@@ -534,9 +562,13 @@ li {
 }
 
 .context-menu li {
-    padding: 8px 16px;
+    padding: 9px 10px;
     cursor: pointer;
     margin: 0;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     transition: background-color 0.1s;
 }
 
@@ -544,9 +576,21 @@ li {
     background: #f0f0f0;
 }
 
+.context-menu li .material-icons {
+    font-size: 18px;
+}
+
+.context-menu-delete {
+    color: #b91c1c;
+}
+
 @media (prefers-color-scheme: dark) {
     .tree-item.is-focused {
         background-color: rgba(59, 130, 246, 0.4);
+    }
+
+    .tree-item.is-focused-detached {
+        background-color: rgba(107, 114, 128, 0.35);
     }
     
     .tree-item:hover {
@@ -555,6 +599,10 @@ li {
 
     .tree-item.is-focused:hover {
         background-color: rgba(59, 130, 246, 0.6);
+    }
+
+    .tree-item.is-focused-detached:hover {
+        background-color: rgba(107, 114, 128, 0.5);
     }
 
     .toggle-icon {
@@ -610,6 +658,10 @@ li {
 
     .context-menu li:hover {
         background: #3d3d3d;
+    }
+
+    .context-menu-delete {
+        color: #fecaca;
     }
 }
 </style>

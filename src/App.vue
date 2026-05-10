@@ -6,9 +6,10 @@ import Header from './components/Header.vue';
 import Footer from './components/Footer.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import WorkspaceManager from './components/WorkspaceManager.vue';
-import { FolderNode, ChatNode, state, findNodeByUrl } from './models/TreeNode.js';
+import { FolderNode, ChatNode, state, findNodeByUrl, getAllParents } from './models/TreeNode.js';
 import { appState } from './models/AppState.js';
-import { loadPersistedData, savePersistedData } from './utils/persistence.js';
+import { loadPersistedData, savePersistedData, reviveWorkspace } from './utils/persistence.js';
+import { showNotify } from './utils/notify.js';
 
 const isDragging = ref(false);
 const treeRootRef = ref(null);
@@ -108,6 +109,77 @@ const deleteWorkspace = (workspaceId) => {
     savePersistedData(appState.workspaces, appState.currentWorkspaceId, appState.settings);
 };
 
+const getUniqueWorkspaceId = (baseId, existingIds = new Set(appState.workspaces.map(workspace => workspace.id))) => {
+    let id = baseId || `workspace_${Date.now()}`;
+    while (existingIds.has(id)) {
+        id = `workspace_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    }
+    return id;
+};
+
+const getUniqueWorkspaceName = (baseName, existingNames = new Set(appState.workspaces.map(workspace => workspace.name.trim()))) => {
+    const name = baseName || '导入工作区';
+    if (!existingNames.has(name)) return name;
+    let index = 2;
+    let nextName = `${name} (${index})`;
+    while (existingNames.has(nextName)) {
+        index += 1;
+        nextName = `${name} (${index})`;
+    }
+    return nextName;
+};
+
+const readFileAsText = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+});
+
+const importWorkspace = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = async () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        try {
+            const text = await readFileAsText(file);
+            const data = JSON.parse(text);
+            const sourceWorkspaces = Array.isArray(data.workspaces) ? data.workspaces : [data];
+            const existingIds = new Set(appState.workspaces.map(workspace => workspace.id));
+            const existingNames = new Set(appState.workspaces.map(workspace => workspace.name.trim()));
+            const importedWorkspaces = sourceWorkspaces
+                .filter(item => item && typeof item === 'object')
+                .map((item, index) => {
+                    const workspace = reviveWorkspace(item, `导入工作区 ${index + 1}`);
+                    workspace.id = getUniqueWorkspaceId(workspace.id, existingIds);
+                    existingIds.add(workspace.id);
+                    workspace.name = getUniqueWorkspaceName(workspace.name, existingNames);
+                    existingNames.add(workspace.name.trim());
+                    return workspace;
+                });
+
+            if (importedWorkspaces.length === 0) {
+                showNotify('未找到可导入的工作区。', 'warning');
+                return;
+            }
+
+            persistCurrentWorkspace();
+            appState.workspaces.push(...importedWorkspaces);
+            const firstImportedWorkspace = importedWorkspaces[0];
+            appState.currentWorkspaceId = firstImportedWorkspace.id;
+            treeData.value = firstImportedWorkspace.tree;
+            savePersistedData(appState.workspaces, appState.currentWorkspaceId, appState.settings);
+            showNotify(`已导入 ${importedWorkspaces.length} 个工作区。`, 'success');
+        } catch (e) {
+            console.error('导入工作区失败：', e);
+            showNotify('导入失败，请确认文件格式正确。', 'error');
+        }
+    };
+    input.click();
+};
+
 const onMouseDown = () => {
     isDragging.value = true;
     document.body.style.cursor = 'col-resize';
@@ -161,7 +233,12 @@ onMounted(() => {
         const url = location.href;
         const node = findNodeByUrl(treeData.value, url);
         if (node) {
+            const parents = getAllParents(treeData.value, node);
+            parents.forEach(parent => parent.isOpen = true);
             state.focusedNode = node;
+            state.focusedNodeDetachedFromUrl = false;
+        } else if (state.focusedNode) {
+            state.focusedNodeDetachedFromUrl = true;
         }
     };
 
@@ -230,6 +307,7 @@ onUnmounted(() => {
         @close="closeWorkspaceManager"
         @select="switchWorkspace"
         @create="createWorkspace"
+        @import-workspace="importWorkspace"
         @bind-folder="bindWorkspaceFolder"
         @rename="renameWorkspace"
         @delete="deleteWorkspace"

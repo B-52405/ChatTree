@@ -14,6 +14,19 @@
                             <span class="bct-slider"></span>
                         </label>
                     </div>
+                    <div class="bct-setting-item">
+                        <label class="bct-setting-label" for="bct-sync-server-port">同步服务器端口</label>
+                        <input
+                            id="bct-sync-server-port"
+                            class="bct-port-input"
+                            type="number"
+                            min="1"
+                            max="65535"
+                            step="1"
+                            v-model.number="settings.syncServerPort"
+                            @blur="normalizeSyncServerPort"
+                        />
+                    </div>
                     <div class="bct-setting-divider"></div>
                     <div class="bct-export-section">
                         <button class="bct-export-btn" @click="handleExport">
@@ -31,6 +44,7 @@
 <script setup>
 import { defineProps, defineEmits } from 'vue';
 import { exportPersistedData } from '../utils/persistence.js';
+import { defaultSettings } from '../models/AppState.js';
 
 const props = defineProps({
     isOpen: Boolean,
@@ -55,10 +69,19 @@ const props = defineProps({
 const emit = defineEmits(['close', 'export']);
 
 const handleClose = () => {
+    normalizeSyncServerPort();
     emit('close');
 };
 
+const normalizeSyncServerPort = () => {
+    const port = Number(props.settings.syncServerPort);
+    props.settings.syncServerPort = Number.isInteger(port) && port >= 1 && port <= 65535
+        ? port
+        : defaultSettings.syncServerPort;
+};
+
 const handleExport = () => {
+    normalizeSyncServerPort();
     const dataToExport = exportPersistedData(props.workspaces, props.currentWorkspaceId, props.settings);
     
     const jsonString = JSON.stringify(dataToExport, null, 2);
@@ -128,8 +151,40 @@ const handleExport = () => {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 16px;
     padding: 8px 0;
     font-size: 14px;
+}
+
+.bct-setting-label {
+    cursor: pointer;
+}
+
+.bct-port-input {
+    width: 104px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: #333;
+    background: #fff;
+    font-size: 14px;
+    text-align: center;
+    box-sizing: border-box;
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+
+.bct-port-input::-webkit-outer-spin-button,
+.bct-port-input::-webkit-inner-spin-button {
+    margin: 0;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.bct-port-input:focus {
+    border-color: #1c64f2;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(28, 100, 242, 0.16);
 }
 
 .bct-setting-divider {
@@ -235,6 +290,12 @@ input:checked + .bct-slider:before {
 
     .bct-setting-divider {
         background-color: #444;
+    }
+
+    .bct-port-input {
+        background: #222;
+        border-color: #444;
+        color: #eee;
     }
 
     .bct-export-tips {

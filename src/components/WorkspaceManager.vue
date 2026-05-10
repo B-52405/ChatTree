@@ -58,10 +58,16 @@
                         hidden
                         @change="handleFolderInputChange"
                     />
-                </div>
-                <div class="bct-workspace-create">
-                    <input v-model="newWorkspaceName" placeholder="新工作区名称" />
-                    <button class="bct-create-btn" @click="handleCreate">新建工作区</button>
+                    <div class="bct-workspace-create">
+                        <div class="bct-workspace-create-row">
+                            <input v-model="newWorkspaceName" placeholder="新工作区名称" />
+                            <button class="bct-create-btn" @click="handleCreate">新建工作区</button>
+                        </div>
+                        <button class="bct-import-btn" @click="handleImportWorkspace">
+                            <span class="material-icons">upload_file</span>
+                            <span>导入工作区</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -85,7 +91,7 @@ const props = defineProps({
     }
 });
 
-const emit = defineEmits(['close', 'select', 'create', 'bind-folder', 'rename', 'delete']);
+const emit = defineEmits(['close', 'select', 'create', 'import-workspace', 'bind-folder', 'rename', 'delete']);
 
 const newWorkspaceName = ref('');
 const folderInputRef = ref(null);
@@ -153,6 +159,10 @@ const handleBindFolder = async (workspace) => {
     }
 };
 
+const handleImportWorkspace = () => {
+    emit('import-workspace');
+};
+
 const handleBindFolderFromMenu = async (workspace) => {
     closeActionMenu();
     await handleBindFolder(workspace);
@@ -210,7 +220,8 @@ const handleDeleteFromMenu = (workspace) => {
 
 .bct-modal-content {
     background: #fff;
-    width: 520px;
+    width: 720px;
+    max-width: calc(100vw - 32px);
     max-height: 80vh;
     border-radius: 14px;
     box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
@@ -240,10 +251,9 @@ const handleDeleteFromMenu = (workspace) => {
 }
 
 .bct-modal-body {
-    padding: 20px;
+    padding: 0;
     display: flex;
-    flex-direction: column;
-    gap: 18px;
+    align-items: stretch;
     max-height: calc(80vh - 72px);
 }
 
@@ -251,11 +261,13 @@ const handleDeleteFromMenu = (workspace) => {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    flex: 1;
+    flex: 1.35 1 0;
     min-height: 0;
     max-height: 360px;
     overflow-y: auto;
-    padding-right: 4px;
+    padding: 20px;
+    box-sizing: border-box;
+    background: #fbfdff;
 }
 
 .bct-workspace-list::-webkit-scrollbar {
@@ -402,13 +414,27 @@ const handleDeleteFromMenu = (workspace) => {
 
 .bct-workspace-create {
     display: flex;
+    width: 100%;
+    flex: 0.9 1 0;
+    flex-direction: column;
+    justify-content: center;
     gap: 10px;
-    padding: 20px 20px 20px;
-    border-radius: 0 0 14px 14px;
+    min-width: 0;
+    padding: 20px;
+    box-sizing: border-box;
+    border-left: 1px solid #e5e7eb;
+    background: #fff;
+}
+
+.bct-workspace-create-row {
+    display: flex;
+    gap: 10px;
 }
 
 .bct-workspace-create input {
     flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
     border: 1px solid #d1d5db;
     border-radius: 10px;
     padding: 10px 12px;
@@ -418,11 +444,52 @@ const handleDeleteFromMenu = (workspace) => {
 .bct-create-btn {
     border: none;
     border-radius: 10px;
-    padding: 10px 16px;
+    padding: 10px 14px;
     background-color: #1c64f2;
     color: #fff;
     cursor: pointer;
     font-size: 14px;
+    white-space: nowrap;
+}
+
+.bct-import-btn {
+    width: 100%;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #fff;
+    color: #374151;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 14px;
+}
+
+.bct-import-btn:hover {
+    background: #f3f4f6;
+}
+
+.bct-import-btn .material-icons {
+    font-size: 18px;
+}
+
+@media (max-width: 640px) {
+    .bct-modal-body {
+        flex-direction: column;
+    }
+
+    .bct-workspace-list,
+    .bct-workspace-create {
+        width: 100%;
+    }
+
+    .bct-workspace-create {
+        flex-basis: auto;
+        border-left: none;
+        border-top: 1px solid #e5e7eb;
+    }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -484,9 +551,23 @@ const handleDeleteFromMenu = (workspace) => {
         background-color: #2563eb;
     }
 
+    .bct-workspace-list {
+        background: #202020;
+    }
+
     .bct-workspace-create {
-        border-top-color: #374151;
+        border-left-color: #333;
+        background: #1e1e1e;
+    }
+
+    .bct-import-btn {
         background: #262626;
+        border-color: #333;
+        color: #ddd;
+    }
+
+    .bct-import-btn:hover {
+        background: #383838;
     }
 }
 </style>

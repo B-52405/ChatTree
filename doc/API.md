@@ -44,3 +44,14 @@
 - **请求参数**: 
 	- `workspace`: 工作区id
 	- `chat`: 对话id
+
+# 6. 打开本地项目
+---
+- **接口名称**: `GET /project`
+- **描述**: 请求打开文件夹对应的VSCode项目文件夹。
+- **请求方式**: `GET`
+- **请求头**:
+	- `Content-Type: application/json`
+- **请求参数**: 
+	- `workspace`: 工作区id
+	- `folder`: 对话id
