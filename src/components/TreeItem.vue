@@ -1,7 +1,10 @@
 <script setup>
 import { ref, computed, nextTick, onMounted } from 'vue';
-import { TreeNode, FolderNode, ChatNode, state, findNodeByUrl, getAllParents } from '../models/TreeNode.js';
+import { TreeNode, FolderNode, ChatNode, state, findNodeByUrl, getAllParents, setFocus } from '../models/TreeNode.js';
 import { showNotify } from '../utils/notify.js';
+import { getSessionIdFromUrl, fetchChatHistory, convertToMarkdown, downloadFile, updateChatTitleOnServer } from '../utils/apiHooks.js';
+import { updateChat } from '../utils/syncApi.js';
+import { appState } from '../models/AppState.js';
 
 const props = defineProps({
     model: {
@@ -25,21 +28,22 @@ const finishEdit = (triggerType = 'blur') => {
     if (props.model.isEditing) {
         let title = props.model.title.trim();
         
-        // 如果是新建文件夹且名字为空，则取消新建
-        if (isFolder.value && !title) {
-            if (props.parentNode) {
-                props.parentNode.removeChild(props.model);
-                if (state.focusedNode === props.model) {
-                    state.focusedNode = null;
-                    state.focusedNodeDetachedFromUrl = false;
+        // 名称不能为空：取消重命名，恢复原名
+        if (!title) {
+            showNotify(`${isFolder.value ? '文件夹' : '对话'}名称不能为空。`, 'warning');
+            if (isFolder.value && oldTitle.value === '') {
+                // 新建文件夹：直接移除
+                if (props.parentNode) {
+                    props.parentNode.removeChild(props.model);
+                    if (state.focusedNode === props.model) {
+                        setFocus(null);
+                    }
                 }
+            } else {
+                props.model.title = oldTitle.value;
+                props.model.isEditing = false;
             }
             return;
-        }
-        
-        // 对话节点如果名字为空，则设置默认名字
-        if (!title) {
-            title = '未命名对话';
         }
         
         // 检查重名 (文件夹和对话)
@@ -53,26 +57,34 @@ const finishEdit = (triggerType = 'blur') => {
                 if (triggerType === 'enter') {
                     showNotify(`${isFolder.value ? '文件夹' : '对话'} "${title}" 已存在，请重新命名。`, 'warning');
                     return; // 拒绝修改，保持编辑状态
-                } else {
-                    const isNewFolder = isFolder.value && oldTitle.value === '';
-                    if (isNewFolder) {
-                        showNotify(`文件夹 "${title}" 已存在，已取消新建。`, 'warning');
-                        if (props.parentNode) {
-                            props.parentNode.removeChild(props.model);
-                            if (state.focusedNode === props.model) {
-                                state.focusedNode = null;
-                                state.focusedNodeDetachedFromUrl = false;
-                            }
-                        }
-                        return;
-                    }
-                    title = oldTitle.value || '未命名对话';
                 }
+                // blur 时
+                const isNewFolder = isFolder.value && oldTitle.value === '';
+                if (isNewFolder) {
+                    showNotify(`文件夹 "${title}" 已存在，已取消新建。`, 'warning');
+                    if (props.parentNode) {
+                        props.parentNode.removeChild(props.model);
+                        if (state.focusedNode === props.model) {
+                            setFocus(null);
+                        }
+                    }
+                    return;
+                }
+                showNotify(`${isFolder.value ? '文件夹' : '对话'} "${title}" 已存在，已恢复原名。`, 'warning');
+                title = oldTitle.value || '未命名对话';
             }
         }
         
         props.model.title = title;
         props.model.isEditing = false;
+
+        // 如果是对话节点且标题有变化，同步到 DeepSeek 服务器
+        if (!isFolder.value && props.model.url && title !== oldTitle.value) {
+            const sid = getSessionIdFromUrl(props.model.url);
+            if (sid) {
+                updateChatTitleOnServer(sid, title);
+            }
+        }
     }
 };
 
@@ -98,9 +110,8 @@ onMounted(() => {
     }
 });
 
-const toggle = () => {
-    state.focusedNode = props.model;
-    state.focusedNodeDetachedFromUrl = false;
+const toggle = async () => {
+    setFocus(props.model);
 
     if (isFolder.value) {
         props.model.isOpen = !props.model.isOpen;
@@ -109,6 +120,17 @@ const toggle = () => {
         const a = document.createElement('a');
         a.href = props.model.url;
         a.click();
+
+        // 每次打开一个对话时，调用“更新对话内容”
+        const sessionId = getSessionIdFromUrl(props.model.url);
+        if (sessionId && appState.currentWorkspaceId) {
+            try {
+                const chatData = await fetchChatHistory(sessionId);
+                await updateChat(appState.currentWorkspaceId, sessionId, chatData);
+            } catch (err) {
+                console.error('更新对话内容失败:', err);
+            }
+        }
     }
 };
 
@@ -281,8 +303,7 @@ const newFolder = () => {
     
     targetFolder.addChild(newF);
     targetFolder.isOpen = true;
-    state.focusedNode = newF;
-    state.focusedNodeDetachedFromUrl = false;
+    setFocus(newF);
 };
 
 const renameItem = () => {
@@ -292,8 +313,6 @@ const renameItem = () => {
 
 const onMenuButtonClick = (event) => {
     event.stopPropagation();
-    state.focusedNode = props.model;
-    state.focusedNodeDetachedFromUrl = false;
     
     const button = event.currentTarget;
     const rect = button.getBoundingClientRect();
@@ -303,11 +322,11 @@ const onMenuButtonClick = (event) => {
 
     const closeMenu = () => {
         state.activeMenuNodeId = null;
-        document.removeEventListener('click', closeMenu);
+        document.removeEventListener('click', closeMenu, true);
     };
     
     setTimeout(() => {
-        document.addEventListener('click', closeMenu);
+        document.addEventListener('click', closeMenu, true);
     }, 0);
 };
 
@@ -316,9 +335,33 @@ const deleteItem = () => {
     if (props.parentNode) {
         props.parentNode.removeChild(props.model);
         if (state.focusedNode === props.model) {
-            state.focusedNode = null;
-            state.focusedNodeDetachedFromUrl = false;
+            setFocus(null);
         }
+    }
+};
+
+const handleDownload = async () => {
+    state.activeMenuNodeId = null;
+    const url = props.model.url;
+    if (!url) {
+        showNotify('未找到对话链接', 'error');
+        return;
+    }
+    const sessionId = getSessionIdFromUrl(url);
+    if (!sessionId) {
+        showNotify('无法从链接提取对话 ID', 'error');
+        return;
+    }
+    try {
+        const data = await fetchChatHistory(sessionId);
+        if (data) {
+            const md = convertToMarkdown(data, sessionId);
+            const title = props.model.title || 'chat';
+            downloadFile(md, `${title.replace(/[\\/:*?"<>|]/g, '_')}.md`);
+            showNotify('下载成功', 'success');
+        }
+    } catch (err) {
+        showNotify(`下载失败: ${err.message || err}`, 'error');
     }
 };
 </script>
@@ -373,6 +416,12 @@ const deleteItem = () => {
                     <li @click.stop="newFolder">
                         <span class="material-icons">create_new_folder</span>
                         <span>新建文件夹</span>
+                    </li>
+                </template>
+                <template v-else>
+                    <li @click.stop="handleDownload">
+                        <span class="material-icons">download</span>
+                        <span>下载</span>
                     </li>
                 </template>
                 <li @click.stop="renameItem">

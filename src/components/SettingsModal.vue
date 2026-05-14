@@ -15,6 +15,13 @@
                         </label>
                     </div>
                     <div class="bct-setting-item">
+                        <span>启用数据同步</span>
+                        <label class="bct-switch">
+                            <input type="checkbox" v-model="settings.syncEnabled">
+                            <span class="bct-slider"></span>
+                        </label>
+                    </div>
+                    <div class="bct-setting-item">
                         <label class="bct-setting-label" for="bct-sync-server-port">同步服务器端口</label>
                         <input
                             id="bct-sync-server-port"

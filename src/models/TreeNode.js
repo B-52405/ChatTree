@@ -6,8 +6,16 @@ export const state = reactive({
     draggedParent: null,
     focusedNode: null,
     focusedNodeDetachedFromUrl: false,
-    activeMenuNodeId: null
+    activeMenuNodeId: null,
+    focusVersion: 0
 });
+
+/** 统一设置焦点节点并触发滚动 */
+export function setFocus(node, detachedFromUrl = false) {
+    state.focusedNode = node;
+    state.focusedNodeDetachedFromUrl = detachedFromUrl;
+    state.focusVersion++;
+}
 
 export function findNodeByUrl(node, url) {
     if (node instanceof ChatNode && node.url === url) return node;

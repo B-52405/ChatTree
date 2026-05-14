@@ -12,7 +12,15 @@
                         <div v-for="workspace in workspaces" :key="workspace.id" class="bct-workspace-entry">
                             <button class="workspace-select-btn" @click="handleSelect(workspace.id)">
                                 <div class="workspace-title-group">
-                                    <span class="workspace-name-text">{{ workspace.name }}</span>
+                                    <span v-if="editingWorkspaceId !== workspace.id" class="workspace-name-text">{{ workspace.name }}</span>
+                                    <input v-else
+                                           ref="editInputRef"
+                                           type="text"
+                                           v-model="editWorkspaceName"
+                                           @blur="finishEditWorkspace('blur', workspace)"
+                                           @keyup.enter="finishEditWorkspace('enter', workspace)"
+                                           @click.stop
+                                           class="workspace-name-input" />
                                     <span v-if="workspace.folderPath" class="workspace-folder-hint">绑定：{{ truncatePath(workspace.folderPath) }}</span>
                                 </div>
                                 <span v-if="workspace.id === currentWorkspaceId" class="workspace-current">当前</span>
@@ -23,32 +31,41 @@
                                     title="更多操作"
                                     aria-haspopup="menu"
                                     :aria-expanded="openActionMenuId === workspace.id"
-                                    @click="toggleActionMenu(workspace.id)"
+                                    @click="toggleActionMenu(workspace.id, $event)"
                                 >
                                     <span class="material-icons">more_vert</span>
                                 </button>
-                                <div v-if="openActionMenuId === workspace.id" class="workspace-action-menu" role="menu">
-                                    <button class="workspace-action-menu-item" role="menuitem" @click="handleBindFolderFromMenu(workspace)">
-                                        <span class="material-icons">folder_open</span>
-                                        <span>编辑绑定文件夹</span>
-                                    </button>
-                                    <button class="workspace-action-menu-item" role="menuitem" @click="handleRenameFromMenu(workspace)">
-                                        <span class="material-icons">edit</span>
-                                        <span>重命名</span>
-                                    </button>
-                                    <button
-                                        class="workspace-action-menu-item workspace-action-menu-delete"
-                                        role="menuitem"
-                                        @click="handleDeleteFromMenu(workspace)"
-                                        :disabled="workspaces.length === 1"
-                                    >
-                                        <span class="material-icons">delete</span>
-                                        <span>删除</span>
-                                    </button>
-                                </div>
                             </div>
                         </div>
                     </div>
+                    <!-- 子菜单通过 Teleport 传送到 body，避免被 overflow 裁剪 -->
+                    <Teleport to="body">
+                        <div
+                            v-if="openActionMenuId"
+                            class="workspace-action-menu"
+                            role="menu"
+                            :style="{ position: 'fixed', top: actionMenuPos.y + 'px', left: actionMenuPos.x + 'px' }"
+                            @click.stop
+                        >
+                            <button class="workspace-action-menu-item" role="menuitem" @click="handleBindFolderFromMenu(activeActionWorkspace)">
+                                <span class="material-icons">folder_open</span>
+                                <span>编辑绑定文件夹</span>
+                            </button>
+                            <button class="workspace-action-menu-item" role="menuitem" @click="handleRenameFromMenu(activeActionWorkspace)">
+                                <span class="material-icons">edit</span>
+                                <span>重命名</span>
+                            </button>
+                            <button
+                                class="workspace-action-menu-item workspace-action-menu-delete"
+                                role="menuitem"
+                                @click="handleDeleteFromMenu(activeActionWorkspace)"
+                                :disabled="workspaces.length === 1"
+                            >
+                                <span class="material-icons">delete</span>
+                                <span>删除</span>
+                            </button>
+                        </div>
+                    </Teleport>
                     <input
                         ref="folderInputRef"
                         type="file"
@@ -75,7 +92,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, nextTick } from 'vue';
 import { defineProps, defineEmits } from 'vue';
 import { showNotify } from '../utils/notify.js';
 
@@ -97,6 +114,14 @@ const newWorkspaceName = ref('');
 const folderInputRef = ref(null);
 const pendingBindWorkspaceId = ref(null);
 const openActionMenuId = ref(null);
+const actionMenuPos = ref({ x: 0, y: 0 });
+const activeActionWorkspace = ref(null);
+
+// 内联编辑工作区名称
+const editingWorkspaceId = ref(null);
+const editWorkspaceName = ref('');
+const editInputRef = ref(null);
+const oldWorkspaceName = ref('');
 
 const truncatePath = (path, maxLength = 30) => {
     if (!path || path.length <= maxLength) return path;
@@ -106,21 +131,37 @@ const truncatePath = (path, maxLength = 30) => {
 
 const handleClose = () => {
     closeActionMenu();
+    // blur 事件会自然触发 finishEditWorkspace，这里只需清理状态
+    editingWorkspaceId.value = null;
     emit('close');
 };
 
 const handleSelect = (workspaceId) => {
+    if (editingWorkspaceId.value) return; // 编辑中不允许切换
     closeActionMenu();
     emit('select', workspaceId);
     emit('close');
 };
 
-const toggleActionMenu = (workspaceId) => {
-    openActionMenuId.value = openActionMenuId.value === workspaceId ? null : workspaceId;
+const toggleActionMenu = (workspaceId, event) => {
+    if (openActionMenuId.value === workspaceId) {
+        closeActionMenu();
+        return;
+    }
+    const btn = event.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    // 菜单显示在按钮右下方，优先靠右对齐
+    actionMenuPos.value = {
+        x: rect.right - 168, // 菜单 min-width 为 168px，右边缘与按钮右边缘对齐
+        y: rect.bottom + 6
+    };
+    openActionMenuId.value = workspaceId;
+    activeActionWorkspace.value = props.workspaces.find(ws => ws.id === workspaceId) || null;
 };
 
 const closeActionMenu = () => {
     openActionMenuId.value = null;
+    activeActionWorkspace.value = null;
 };
 
 const handleCreate = () => {
@@ -178,16 +219,52 @@ const handleFolderInputChange = (event) => {
     pendingBindWorkspaceId.value = null;
 };
 
-const handleRename = (workspace) => {
-    const newName = prompt('请输入新的工作区名称：', workspace.name);
-    if (newName && newName.trim()) {
-        emit('rename', { id: workspace.id, name: newName.trim() });
+const startEditWorkspace = (workspace) => {
+    oldWorkspaceName.value = workspace.name;
+    editWorkspaceName.value = workspace.name;
+    editingWorkspaceId.value = workspace.id;
+    nextTick(() => {
+        const input = document.querySelector('.workspace-name-input');
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    });
+};
+
+const finishEditWorkspace = (triggerType, workspace) => {
+    if (editingWorkspaceId.value !== workspace.id) return;
+    const newName = editWorkspaceName.value.trim();
+
+    if (!newName) {
+        // 空名称：取消重命名，恢复原名
+        showNotify('工作区名称不能为空。', 'warning');
+        editWorkspaceName.value = oldWorkspaceName.value;
+        editingWorkspaceId.value = null;
+        return;
     }
+
+    if (newName !== oldWorkspaceName.value) {
+        // 检查重名
+        if (props.workspaces.some(ws => ws.id !== workspace.id && ws.name.trim() === newName)) {
+            if (triggerType === 'enter') {
+                showNotify('工作区名称已存在，请重新命名。', 'warning');
+                return; // 保持编辑状态
+            }
+            // blur 时：恢复原名并通知
+            showNotify('工作区名称已存在，已恢复原名。', 'warning');
+            editWorkspaceName.value = oldWorkspaceName.value;
+            editingWorkspaceId.value = null;
+            return;
+        }
+        emit('rename', { id: workspace.id, name: newName });
+    }
+    editingWorkspaceId.value = null;
 };
 
 const handleRenameFromMenu = (workspace) => {
     closeActionMenu();
-    handleRename(workspace);
+    startEditWorkspace(workspace);
 };
 
 const handleDelete = (workspace) => {
@@ -301,6 +378,19 @@ const handleDeleteFromMenu = (workspace) => {
     white-space: nowrap;
 }
 
+.workspace-name-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #1c64f2;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 14px;
+    background: #fff;
+    color: #333;
+    outline: none;
+}
+
 .bct-workspace-entry {
     background: #f8fafc;
     border: 1px solid #e5e7eb;
@@ -368,10 +458,7 @@ const handleDeleteFromMenu = (workspace) => {
 }
 
 .workspace-action-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 2;
+    z-index: 1000001;
     min-width: 168px;
     padding: 6px;
     border: 1px solid #e5e7eb;
@@ -568,6 +655,16 @@ const handleDeleteFromMenu = (workspace) => {
 
     .bct-import-btn:hover {
         background: #383838;
+    }
+
+    .workspace-name-text {
+        color: #eee;
+    }
+
+    .workspace-name-input {
+        background: #2d2d2d;
+        color: #eee;
+        border-color: #2563eb;
     }
 }
 </style>

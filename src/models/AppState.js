@@ -4,7 +4,8 @@ import { reactive } from 'vue';
 export const defaultSettings = {
     skipDeleteConfirm: false,
     sidebarWidth: 335,
-    syncServerPort: 8800
+    syncServerPort: 8800,
+    syncEnabled: true
 };
 
 export const appState = reactive({

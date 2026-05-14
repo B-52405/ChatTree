@@ -1,7 +1,7 @@
 <script setup>
 import { ref, nextTick, watch } from 'vue';
 import TreeItem from './TreeItem.vue';
-import { FolderNode, ChatNode, state, findParent, findNodeByUrl, getAllParents } from '../models/TreeNode.js';
+import { FolderNode, ChatNode, state, findParent, findNodeByUrl, getAllParents, setFocus } from '../models/TreeNode.js';
 import { showNotify } from '../utils/notify.js';
 
 const props = defineProps({
@@ -15,20 +15,21 @@ const isRootDragOver = ref(false);
 const treeContainerRef = ref(null);
 
 const clearFocus = () => {
-    state.focusedNode = null;
-    state.focusedNodeDetachedFromUrl = false;
+    setFocus(null);
 };
 
-const scrollFocusedNodeIntoView = async (node) => {
+const scrollFocusedNodeIntoView = () => {
+    const node = state.focusedNode;
     if (!node) return;
-    await nextTick();
-    const el = treeContainerRef.value?.querySelector(`.tree-item[data-id="${node.id}"]`);
-    if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    nextTick(() => {
+        const el = treeContainerRef.value?.querySelector(`.tree-item[data-id="${node.id}"]`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    });
 };
 
-watch(() => state.focusedNode, scrollFocusedNodeIntoView);
+watch(() => state.focusVersion, scrollFocusedNodeIntoView);
 
 const createNewFolder = () => {
     let targetFolder = props.model;
@@ -125,8 +126,7 @@ const onRootDrop = (event) => {
         props.model.addChild(newNode);
         // 只有新创建的节点才改变焦点，拖拽的节点不改变焦点
         if (!state.draggedNode) {
-            state.focusedNode = newNode;
-            state.focusedNodeDetachedFromUrl = false;
+            setFocus(newNode);
         }
     }
 };
