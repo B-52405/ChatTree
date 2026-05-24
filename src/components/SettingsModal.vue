@@ -40,7 +40,20 @@
                             <span class="material-icons">download</span>
                             导出数据
                         </button>
-                        <p class="bct-export-tips">将所有数据和设置导出为JSON文件</p>
+                        <!-- <p class="bct-export-tips">导出脚本全部 GM_setValue 存储数据</p> -->
+                    </div>
+                    <div class="bct-import-section">
+                        <div class="bct-import-buttons">
+                            <button class="bct-import-btn bct-import-merge" @click="handleImportMerge">
+                                <span class="material-icons">merge</span>
+                                导入数据（合并）
+                            </button>
+                            <button class="bct-import-btn bct-import-replace" @click="handleImportReplace">
+                                <span class="material-icons">file_upload</span>
+                                导入数据（替换）
+                            </button>
+                        </div>
+                        <p class="bct-export-tips">合并：保留现有数据，合并同名工作区/文件夹，跳过重复对话</p>
                     </div>
                 </div>
             </div>
@@ -50,7 +63,7 @@
 
 <script setup>
 import { defineProps, defineEmits } from 'vue';
-import { exportPersistedData } from '../utils/persistence.js';
+
 import { defaultSettings } from '../models/AppState.js';
 
 const props = defineProps({
@@ -73,7 +86,7 @@ const props = defineProps({
     }
 });
 
-const emit = defineEmits(['close', 'export']);
+const emit = defineEmits(['close', 'export', 'import-merge', 'import-replace']);
 
 const handleClose = () => {
     normalizeSyncServerPort();
@@ -89,9 +102,25 @@ const normalizeSyncServerPort = () => {
 
 const handleExport = () => {
     normalizeSyncServerPort();
-    const dataToExport = exportPersistedData(props.workspaces, props.currentWorkspaceId, props.settings);
-    
-    const jsonString = JSON.stringify(dataToExport, null, 2);
+
+    // 导出整个脚本所有 GM_setValue 的数据
+    const allKeys = GM_listValues();
+    const allData = {};
+    for (const key of allKeys) {
+        try {
+            allData[key] = GM_getValue(key);
+        } catch (e) {
+            allData[key] = null;
+        }
+    }
+
+    const exportPayload = {
+        exportTime: new Date().toISOString(),
+        totalKeys: allKeys.length,
+        data: allData
+    };
+
+    const jsonString = JSON.stringify(exportPayload, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -103,6 +132,52 @@ const handleExport = () => {
     URL.revokeObjectURL(url);
     
     emit('export');
+};
+
+/** 选择文件并解析 JSON */
+const pickAndParseFile = () => new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = async () => {
+        const file = input.files && input.files[0];
+        if (!file) return reject(new Error('未选择文件'));
+        try {
+            const reader = new FileReader();
+            reader.onload = () => resolve(JSON.parse(reader.result));
+            reader.onerror = () => reject(reader.error);
+            reader.readAsText(file);
+        } catch (e) {
+            reject(e);
+        }
+    };
+    input.click();
+});
+
+const handleImportMerge = async () => {
+    normalizeSyncServerPort();
+    if (!confirm('合并导入将保留现有数据，重名工作区/文件夹会合并，相同URL的对话将被跳过。\n\n确定要继续吗？')) return;
+    try {
+        const data = await pickAndParseFile();
+        emit('import-merge', data);
+    } catch (e) {
+        if (e.message !== '未选择文件') {
+            console.error('导入文件解析失败:', e);
+        }
+    }
+};
+
+const handleImportReplace = async () => {
+    normalizeSyncServerPort();
+    if (!confirm('替换导入将清空所有现有数据，用导入文件完全替换。\n\n此操作不可撤销，确定要继续吗？')) return;
+    try {
+        const data = await pickAndParseFile();
+        emit('import-replace', data);
+    } catch (e) {
+        if (e.message !== '未选择文件') {
+            console.error('导入文件解析失败:', e);
+        }
+    }
 };
 </script>
 
@@ -122,7 +197,7 @@ const handleExport = () => {
 
 .bct-modal-content {
     background: #fff;
-    width: 350px;
+    width: 420px;
     border-radius: 12px;
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
     overflow: hidden;
@@ -202,6 +277,7 @@ const handleExport = () => {
 
 .bct-export-section {
     padding-top: 8px;
+    padding-bottom: 4px;
 }
 
 .bct-export-btn {
@@ -234,6 +310,45 @@ const handleExport = () => {
     font-size: 12px;
     color: #999;
     text-align: center;
+}
+
+.bct-import-section {
+    padding-top: 4px;
+}
+
+.bct-import-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.bct-import-btn {
+    flex: 1;
+    padding: 8px 6px;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: background-color 0.2s;
+}
+
+.bct-import-btn .material-icons {
+    font-size: 16px;
+}
+
+.bct-import-merge,
+.bct-import-replace {
+    background-color: #1c64f2;
+}
+
+.bct-import-merge:hover,
+.bct-import-replace:hover {
+    background-color: #1554d0;
 }
 
 .bct-switch {

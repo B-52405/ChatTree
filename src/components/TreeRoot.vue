@@ -3,6 +3,7 @@ import { ref, nextTick, watch } from 'vue';
 import TreeItem from './TreeItem.vue';
 import { FolderNode, ChatNode, state, findParent, findNodeByUrl, getAllParents, setFocus } from '../models/TreeNode.js';
 import { showNotify } from '../utils/notify.js';
+import { appState } from '../models/AppState.js';
 
 const props = defineProps({
     model: {
@@ -140,12 +141,24 @@ const onRootDrop = (event) => {
              @dragover.prevent="isRootDragOver = true"
              @dragleave="isRootDragOver = false"
              @drop="onRootDrop">
-            <ul class="root-tree" :class="{ 'drag-after': isRootDragOver }" v-if="model.children && model.children.length > 0">
-                <TreeItem v-for="child in model.children" :key="child.id" :model="child" :parentNode="model" />
-            </ul>
-            <div v-else class="empty-hint" :class="{ 'drag-into': isRootDragOver }" @click="createNewFolder">
-                数据为空，点击或在此拖拽以创建内容
+             
+            <!-- Skeleton Loader -->
+            <div v-if="appState.isLoading" class="skeleton-container">
+                <div class="skeleton-item" v-for="i in 8" :key="i" :style="{ paddingLeft: `${(i % 3 === 0 ? 0 : i % 3 === 1 ? 16 : 32)}px` }">
+                    <div class="skeleton-icon"></div>
+                    <div class="skeleton-text" :style="{ width: `${Math.random() * 30 + 40}%` }"></div>
+                </div>
             </div>
+
+            <!-- 实际内容 -->
+            <template v-else>
+                <ul class="root-tree" :class="{ 'drag-after': isRootDragOver }" v-if="model.children && model.children.length > 0">
+                    <TreeItem v-for="child in model.children" :key="child.id" :model="child" :parentNode="model" />
+                </ul>
+                <div v-else class="empty-hint" :class="{ 'drag-into': isRootDragOver }" @click="createNewFolder">
+                    数据为空，点击或在此拖拽以创建内容
+                </div>
+            </template>
         </div>
     </div>
 </template>
@@ -202,6 +215,42 @@ const onRootDrop = (event) => {
     background-color: #f0f8ff;
 }
 
+/* Skeleton Styles */
+.skeleton-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+}
+
+.skeleton-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+}
+
+.skeleton-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: #e2e8f0;
+    animation: pulse 1.5s infinite ease-in-out;
+}
+
+.skeleton-text {
+    height: 16px;
+    border-radius: 4px;
+    background: #e2e8f0;
+    animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 0.3; }
+    100% { opacity: 0.6; }
+}
+
 @media (prefers-color-scheme: dark) {
     .file-tree-container.root-drag-over {
         background-color: rgba(59, 130, 246, 0.15);
@@ -216,6 +265,10 @@ const onRootDrop = (event) => {
         border-color: #3b82f6;
         color: #3b82f6;
         background-color: rgba(59, 130, 246, 0.15);
+    }
+    
+    .skeleton-icon, .skeleton-text {
+        background: #333;
     }
 }
 </style>

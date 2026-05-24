@@ -16,7 +16,7 @@ export default defineConfig({
                 author: 'B',
                 match: ['*://chat.deepseek.com/*'],
                 // 如果插件未能自动检测到（一般都能检测到），可以强制添加 grant 
-                grant: ['GM_setValue', 'GM_getValue', 'GM_addStyle'],
+                grant: ['GM_setValue', 'GM_getValue', 'GM_listValues', 'GM_addStyle'],
             },
             build: {
                 externalGlobals: {

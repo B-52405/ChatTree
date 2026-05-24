@@ -1,5 +1,5 @@
 import { appState } from '../models/AppState.js';
-import { notify } from './notify.js';
+import { showNotify } from './notify.js';
 
 function getBaseUrl() {
     const port = appState.settings.syncServerPort || 8800;

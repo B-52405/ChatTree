@@ -11,6 +11,7 @@ export const defaultSettings = {
 export const appState = reactive({
     settings: { ...defaultSettings },
     isSettingsOpen: false,
+    isLoading: true,
     currentWorkspaceId: null,
     workspaces: []
 });

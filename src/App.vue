@@ -39,8 +39,12 @@ const getCurrentWorkspace = () => appState.workspaces.find(ws => ws.id === appSt
 
 const loadWorkspace = async () => {
     const currentWorkspace = getCurrentWorkspace();
-    if (!currentWorkspace) return;
+    if (!currentWorkspace) {
+        appState.isLoading = false;
+        return;
+    }
     
+    appState.isLoading = true;
     // 每次打开一个工作区时，调用“获取文件树数据”
     try {
         const treeDataRes = await getTree(currentWorkspace.id);
@@ -49,6 +53,8 @@ const loadWorkspace = async () => {
         }
     } catch (e) {
         console.error('获取文件树数据失败:', e);
+    } finally {
+        appState.isLoading = false;
     }
 
     treeData.value = currentWorkspace.tree;
@@ -230,6 +236,126 @@ const importWorkspace = () => {
     input.click();
 };
 
+/**
+ * 将 sourceTree 的节点合并到 targetTree 中。
+ * 规则：
+ *   - 同名文件夹递归合并
+ *   - ChatNode 按 url 去重（已存在则跳过）
+ *   - 不存在的文件夹和对话直接追加
+ */
+const mergeTrees = (targetTree, sourceTree) => {
+    if (!(targetTree instanceof FolderNode) || !(sourceTree instanceof FolderNode)) return;
+    for (const sourceChild of sourceTree.children) {
+        if (sourceChild instanceof ChatNode) {
+            // 跳过相同 url 的对话
+            if (!findNodeByUrl(targetTree, sourceChild.url)) {
+                targetTree.addChild(sourceChild);
+            }
+        } else if (sourceChild instanceof FolderNode) {
+            const existingFolder = targetTree.children.find(
+                child => child instanceof FolderNode && child.title === sourceChild.title
+            );
+            if (existingFolder) {
+                mergeTrees(existingFolder, sourceChild);
+            } else {
+                targetTree.addChild(sourceChild);
+            }
+        }
+    }
+};
+
+/** 从导入数据中提取工作区数组 */
+const extractWorkspacesFromImport = (data) => {
+    // 新导出格式：{ data: { chattree_data: { workspaces: [...] } } }
+    let source = data;
+    if (data.data && data.data.chattree_data) {
+        source = data.data.chattree_data;
+    }
+    return Array.isArray(source.workspaces) ? source.workspaces : [source];
+};
+
+/** 合并导入：保留现有数据，重名工作区/文件夹合并，跳过相同URL对话 */
+const handleImportMerge = (data) => {
+    try {
+        const sourceWorkspaces = extractWorkspacesFromImport(data);
+        if (sourceWorkspaces.length === 0) {
+            showNotify('未找到可导入的工作区。', 'warning');
+            return;
+        }
+
+        const existingNames = new Set(appState.workspaces.map(ws => ws.name.trim()));
+        const existingIds = new Set(appState.workspaces.map(ws => ws.id));
+        let mergedCount = 0;
+        let newCount = 0;
+
+        for (const sourceWs of sourceWorkspaces) {
+            if (!sourceWs || typeof sourceWs !== 'object') continue;
+            const sourceName = (sourceWs.name || '').trim();
+
+            // 查找同名工作区
+            const existingWs = appState.workspaces.find(ws => ws.name.trim() === sourceName);
+            if (existingWs) {
+                // 合并树
+                const sourceTree = reviveWorkspace(sourceWs).tree;
+                mergeTrees(existingWs.tree, sourceTree);
+                mergedCount++;
+            } else {
+                // 作为新工作区添加
+                const newWs = reviveWorkspace(sourceWs);
+                newWs.id = getUniqueWorkspaceId(newWs.id, existingIds);
+                existingIds.add(newWs.id);
+                newWs.name = getUniqueWorkspaceName(newWs.name, existingNames);
+                existingNames.add(newWs.name.trim());
+                appState.workspaces.push(newWs);
+                newCount++;
+            }
+        }
+
+        persistCurrentWorkspace();
+        savePersistedData(appState.workspaces, appState.currentWorkspaceId, appState.settings);
+        pushWorkspacesUpdate();
+
+        const parts = [];
+        if (mergedCount > 0) parts.push(`${mergedCount} 个合并`);
+        if (newCount > 0) parts.push(`${newCount} 个新增`);
+        showNotify(`导入完成：${parts.join('，')}。`, 'success');
+    } catch (e) {
+        console.error('合并导入失败：', e);
+        showNotify('导入失败，请确认文件格式正确。', 'error');
+    }
+};
+
+/** 替换导入：清空现有数据，用导入数据完全替换 */
+const handleImportReplace = (data) => {
+    try {
+        const sourceWorkspaces = extractWorkspacesFromImport(data);
+        if (sourceWorkspaces.length === 0) {
+            showNotify('未找到可导入的工作区。', 'warning');
+            return;
+        }
+
+        const importedWorkspaces = sourceWorkspaces
+            .filter(item => item && typeof item === 'object')
+            .map(item => reviveWorkspace(item));
+
+        if (importedWorkspaces.length === 0) {
+            showNotify('未找到可导入的工作区。', 'warning');
+            return;
+        }
+
+        persistCurrentWorkspace();
+        appState.workspaces = importedWorkspaces;
+        appState.currentWorkspaceId = importedWorkspaces[0].id;
+        treeData.value = importedWorkspaces[0].tree;
+        savePersistedData(appState.workspaces, appState.currentWorkspaceId, appState.settings);
+        pushWorkspacesUpdate();
+        showNotify(`已替换为 ${importedWorkspaces.length} 个工作区。`, 'success');
+    } catch (e) {
+        console.error('替换导入失败：', e);
+        showNotify('导入失败，请确认文件格式正确。', 'error');
+    }
+};
+
 const onMouseDown = () => {
     isDragging.value = true;
     document.body.style.cursor = 'col-resize';
@@ -272,6 +398,62 @@ const onDropDelete = (e) => {
     state.draggedNode = null;
     state.draggedParent = null;
     document.body.classList.remove('is-dragging-node');
+};
+
+// 监听 DeepSeek 对话生成完成事件，如果未加入目录，自动加入未分类文件夹
+const handleChatCompleted = async (event) => {
+    const { chatSessionId } = event.detail;
+    if (!chatSessionId) return;
+
+    const chatUrl = `https://chat.deepseek.com/a/chat/s/${chatSessionId}`;
+
+    // 在所有工作区中检查是否已经存在该对话
+    let exists = false;
+    for (const workspace of appState.workspaces) {
+        if (workspace.tree && findNodeByUrl(workspace.tree, chatUrl)) {
+            exists = true;
+            break;
+        }
+    }
+
+    if (!exists && treeData.value) {
+        // 在当前工作区查找或创建“未分类”文件夹
+        let uncategorizedFolder = treeData.value.children.find(child => child instanceof FolderNode && child.title === '未分类');
+        if (!uncategorizedFolder) {
+            uncategorizedFolder = new FolderNode({ title: '未分类', isEditing: false, isOpen: true });
+            treeData.value.children.unshift(uncategorizedFolder); // 添加到顶部
+        }
+
+        // 创建新的 ChatNode
+        const newNode = new ChatNode({ title: '未命名对话', url: chatUrl });
+        uncategorizedFolder.addChild(newNode);
+        uncategorizedFolder.isOpen = true; // 确保展开
+        
+        showNotify(`对话已自动归档至“未分类”文件夹`, 'success');
+        
+        // 确保新加入目录后立即保存
+        persistCurrentWorkspace();
+        
+        // 异步尝试获取最新标题，不阻塞当前逻辑
+        setTimeout(async () => {
+            try {
+                const response = await fetchChatHistory(chatSessionId);
+                const title = response?.data?.biz_data?.chat_session?.title;
+                if (title) {
+                    // 获取响应式的节点对象更新以触发UI变化
+                    const reactiveNode = findNodeByUrl(treeData.value, chatUrl);
+                    if (reactiveNode) {
+                        reactiveNode.title = title;
+                        updateChatTitleOnServer(chatSessionId, title);
+                        persistCurrentWorkspace();
+                    }
+                }
+                console.log('对话标题更新完成:', title);
+            } catch (e) {
+                console.warn('[ChatTree] 获取自动归档的对话标题失败:', e);
+            }
+        }, 0);
+    }
 };
 
 // 监听 DeepSeek completion 流中检测到的标题事件，自动更新树节点标题
@@ -344,6 +526,9 @@ onMounted(() => {
 
     // 监听 DeepSeek completion 流中的标题事件
     window.addEventListener('deepseek-title-detected', handleTitleDetected);
+    
+    // 监听 DeepSeek 对话生成完成事件
+    window.addEventListener('deepseek-chat-completed', handleChatCompleted);
 
     // 监听 URL 变化自动聚焦
     const updateFocusByUrl = () => {
@@ -379,6 +564,7 @@ onUnmounted(() => {
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
     window.removeEventListener('deepseek-title-detected', handleTitleDetected);
+    window.removeEventListener('deepseek-chat-completed', handleChatCompleted);
 });
 
 </script>
@@ -394,6 +580,8 @@ onUnmounted(() => {
         :currentWorkspaceId="appState.currentWorkspaceId"
         @close="appState.isSettingsOpen = false"
         @export="() => {}"
+        @import-merge="handleImportMerge"
+        @import-replace="handleImportReplace"
     />
 
     <div class="bct-wrapper" :style="{ width: `${appState.settings.sidebarWidth}px` }">

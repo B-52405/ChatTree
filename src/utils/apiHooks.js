@@ -171,8 +171,7 @@ XMLHttpRequest.prototype.send = function(...args) {
 };
 
 /**
- * 解析 EventStream chunk，查找 "event: title" 事件
- * 格式: event: title\ndata: {"content":"对话标题"}\n\n
+ * 解析 EventStream chunk，查找 "event: title" 和 "event: close" 事件
  */
 function parseTitleEvent(chunk, chatSessionId) {
     // 匹配 "event: title" 后紧跟的 "data: {...}" JSON 行（兼容 \n 和 \r\n）
@@ -196,6 +195,21 @@ function parseTitleEvent(chunk, chatSessionId) {
                 );
             }
         } catch (e) { /* 忽略 JSON 解析错误 */ }
+    }
+
+    // 匹配 "event: close"
+    const closeRegex = /event:\s*close/g;
+    if (closeRegex.test(chunk)) {
+        window.dispatchEvent(new CustomEvent('deepseek-chat-completed', {
+            detail: {
+                chatSessionId: chatSessionId
+            }
+        }));
+        console.log(
+            '%c[ChatTree] ✅ 检测到对话生成完成:',
+            'color: #00e676; font-weight: bold;',
+            chatSessionId
+        );
     }
 }
 
