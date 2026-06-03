@@ -14,6 +14,14 @@ const props = defineProps({
     parentNode: {
         type: FolderNode,
         default: null
+    },
+    isUncategorized: {
+        type: Boolean,
+        default: false
+    },
+    isHistory: {
+        type: Boolean,
+        default: false
     }
 });
 
@@ -22,6 +30,16 @@ const oldTitle = ref('');
 
 const isFolder = computed(() => {
     return props.model instanceof FolderNode;
+});
+
+const tooltipText = computed(() => {
+    const formatDate = (ts) => {
+        if (!ts) return '—';
+        const d = new Date(ts * 1000);
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    };
+    return `创建时间: ${formatDate(props.model.insertedAt)}\n修改时间: ${formatDate(props.model.updatedAt)}`;
 });
 
 const finishEdit = (triggerType = 'blur') => {
@@ -110,11 +128,39 @@ onMounted(() => {
     }
 });
 
+// 同步文件夹内顶层对话（直接子 ChatNode）的标题
+const syncDirectChatTitles = async (folder) => {
+    for (const child of folder.children) {
+        if (!(child instanceof ChatNode) || !child.url) continue;
+        const sessionId = getSessionIdFromUrl(child.url);
+        if (!sessionId) continue;
+        try {
+            const response = await fetchChatHistory(sessionId);
+            const session = response?.data?.biz_data?.chat_session;
+            if (session) {
+                if (session.title && child.title !== session.title) {
+                    child.title = session.title;
+                    updateChatTitleOnServer(sessionId, session.title);
+                }
+                child.insertedAt = session.inserted_at ?? child.insertedAt;
+                child.updatedAt = session.updated_at ?? child.updatedAt;
+            }
+        } catch (e) {
+            // 单个对话获取失败时静默跳过
+        }
+    }
+};
+
 const toggle = async () => {
     setFocus(props.model);
 
     if (isFolder.value) {
+        const wasClosed = !props.model.isOpen;
         props.model.isOpen = !props.model.isOpen;
+        // 当折叠的文件夹被展开时，同步其内顶层对话的标题
+        if (wasClosed) {
+            syncDirectChatTitles(props.model);
+        }
     } else if (props.model.url) {
         // 创建一个 a 标签并模拟点击，这样可以被 DeepSeek 本身的 SPA 路由捕获，实现无刷新跳转
         const a = document.createElement('a');
@@ -135,8 +181,8 @@ const toggle = async () => {
 };
 
 const onDragStart = (event) => {
-    // 阻止根节点被拖拖拽
-    if (!props.parentNode) {
+    // 阻止根节点、未分类和历史节点被拖拽
+    if (!props.parentNode || props.isUncategorized || props.isHistory) {
         event.preventDefault();
         return;
     }
@@ -244,7 +290,7 @@ const onDrop = (event) => {
         const titleDiv = doc.querySelector('.c08e6e93');
         const title = titleDiv ? titleDiv.textContent.trim() : '未命名对话';
 
-        const existingNode = state.rootNode ? findNodeByUrl(state.rootNode, url) : null;
+        const now = Math.floor(Date.now() / 1000);        const existingNode = state.rootNode ? findNodeByUrl(state.rootNode, url) : null;
         if (existingNode) {
             showNotify('整个文件树中已存在相同的对话', 'warning');
             
@@ -272,12 +318,13 @@ const onDrop = (event) => {
             return;
         }
 
-        newNode = new ChatNode({ title, url });
+        newNode = new ChatNode({ title, url, insertedAt: now, updatedAt: now });
     }
 
     // 根据计算出的位置进行插入
     if (pos === 'into' && isFolder.value) {
-        props.model.addChild(newNode);
+        // 插入到目标文件夹顶部
+        props.model.children.splice(0, 0, newNode);
         props.model.isOpen = true;
     } else if (props.parentNode) {
         const index = props.parentNode.children.indexOf(props.model);
@@ -301,13 +348,15 @@ const newFolder = () => {
         targetFolder = props.parentNode; // 如果当前是对话，在其父文件夹下创建
     }
     
-    targetFolder.addChild(newF);
+    // 插入到目标文件夹顶部
+    targetFolder.children.splice(0, 0, newF);
     targetFolder.isOpen = true;
     setFocus(newF);
 };
 
 const renameItem = () => {
     state.activeMenuNodeId = null;
+    if (props.isUncategorized || props.isHistory) return;
     startEdit();
 };
 
@@ -332,6 +381,7 @@ const onMenuButtonClick = (event) => {
 
 const deleteItem = () => {
     state.activeMenuNodeId = null;
+    if (props.isUncategorized || props.isHistory) return;
     if (props.parentNode) {
         props.parentNode.removeChild(props.model);
         if (state.focusedNode === props.model) {
@@ -377,7 +427,8 @@ const handleDownload = async () => {
                  'is-focused-detached': state.focusedNode === model && state.focusedNodeDetachedFromUrl
              }" 
              :data-id="model.id"
-             :draggable="!!parentNode"
+             :title="tooltipText"
+             :draggable="!!parentNode && !isUncategorized && !isHistory"
              @dragstart.stop="onDragStart"
              @dragend.stop="onDragEnd"
              @click.stop="toggle" 
@@ -406,7 +457,7 @@ const handleDownload = async () => {
 
         <ul v-show="model.isOpen" v-if="isFolder" class="tree-list">
             <!-- 递归调用自身 -->
-            <TreeItem v-for="(child, index) in model.children" :key="index" :model="child" :parentNode="model" />
+            <TreeItem v-for="child in model.children" :key="child.id" :model="child" :parentNode="model" />
         </ul>
 
         <!-- 右键菜单 -->
@@ -424,11 +475,11 @@ const handleDownload = async () => {
                         <span>下载</span>
                     </li>
                 </template>
-                <li @click.stop="renameItem">
+                <li v-if="!isUncategorized && !isHistory" @click.stop="renameItem">
                     <span class="material-icons">edit</span>
                     <span>重命名</span>
                 </li>
-                <li class="context-menu-delete" @click.stop="deleteItem">
+                <li v-if="!isUncategorized && !isHistory" class="context-menu-delete" @click.stop="deleteItem">
                     <span class="material-icons">delete</span>
                     <span>删除</span>
                 </li>
@@ -441,11 +492,11 @@ const handleDownload = async () => {
 .tree-item {
     cursor: pointer;
     user-select: none;
-    padding: 4px 6px;
+    padding: 2px 4px;
     display: flex;
     align-items: center;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 13px;
     position: relative;
     transition: background-color 0.15s;
 }
@@ -483,17 +534,17 @@ const handleDownload = async () => {
 }
 
 .toggle-icon {
-    width: 18px;
+    width: 16px;
     display: inline-block;
-    font-size: 18px;
+    font-size: 16px;
     color: #999;
     flex-shrink: 0;
     text-align: center;
 }
 
 .icon {
-    margin-right: 4px;
-    font-size: 18px;
+    margin-right: 3px;
+    font-size: 16px;
     flex-shrink: 0;
     color: #666;
 }
@@ -519,8 +570,8 @@ const handleDownload = async () => {
     min-width: 0;
     margin: 0;
     padding: 0px 4px;
-    font-size: 14px;
-    min-height: 25px;
+    font-size: 13px;
+    min-height: 22px;
     font-family: inherit;
     border: 1px solid #007acc;
     border-radius: 3px;
@@ -548,8 +599,8 @@ const handleDownload = async () => {
 
 .tree-list {
     list-style-type: none;
-    padding-left: 14px;
-    margin: 0 0 0 14px;
+    padding-left: 10px;
+    margin: 0 0 0 10px;
     border-left: 1px dashed #dcdcdc;
 }
 
@@ -611,7 +662,7 @@ li {
 }
 
 .context-menu li {
-    padding: 9px 10px;
+    padding: 7px 10px;
     cursor: pointer;
     margin: 0;
     border-radius: 8px;

@@ -121,10 +121,12 @@ const closeWorkspaceManager = () => {
 };
 
 const createWorkspace = ({ name, folderPath = null }) => {
+    const uncategorized = new FolderNode({ title: '未分类', isEditing: false, isOpen: true });
+    const history = new FolderNode({ title: '历史', isEditing: false, isOpen: false });
     const newWorkspace = {
         id: `workspace_${Date.now()}`,
         name,
-        tree: new FolderNode({ title: 'root', children: [] }),
+        tree: new FolderNode({ title: 'root', children: [uncategorized, history] }),
         folderPath
     };
     appState.workspaces.push(newWorkspace);
@@ -424,12 +426,29 @@ const handleChatCompleted = async (event) => {
             treeData.value.children.unshift(uncategorizedFolder); // 添加到顶部
         }
 
-        // 创建新的 ChatNode
+        // 获取当天日期，在"未分类"下查找或创建日期文件夹
+        const today = new Date();
+        const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        let dateFolder = uncategorizedFolder.children.find(child => child instanceof FolderNode && child.title === dateStr);
+        if (!dateFolder) {
+            dateFolder = new FolderNode({ title: dateStr, isEditing: false, isOpen: true });
+            // 按日期降序插入（新日期靠前）
+            let insertIdx = 0;
+            while (insertIdx < uncategorizedFolder.children.length &&
+                   uncategorizedFolder.children[insertIdx] instanceof FolderNode &&
+                   uncategorizedFolder.children[insertIdx].title > dateStr) {
+                insertIdx++;
+            }
+            uncategorizedFolder.children.splice(insertIdx, 0, dateFolder);
+        }
+
+        // 创建新的 ChatNode，加入日期文件夹
         const newNode = new ChatNode({ title: '未命名对话', url: chatUrl });
-        uncategorizedFolder.addChild(newNode);
+        dateFolder.addChild(newNode);
         uncategorizedFolder.isOpen = true; // 确保展开
-        
-        showNotify(`对话已自动归档至“未分类”文件夹`, 'success');
+        dateFolder.isOpen = true;
+
+        showNotify(`对话已自动归档至"未分类 / ${dateStr}"`, 'success');
         
         // 确保新加入目录后立即保存
         persistCurrentWorkspace();
@@ -438,17 +457,21 @@ const handleChatCompleted = async (event) => {
         setTimeout(async () => {
             try {
                 const response = await fetchChatHistory(chatSessionId);
-                const title = response?.data?.biz_data?.chat_session?.title;
-                if (title) {
+                const session = response?.data?.biz_data?.chat_session;
+                if (session) {
                     // 获取响应式的节点对象更新以触发UI变化
                     const reactiveNode = findNodeByUrl(treeData.value, chatUrl);
                     if (reactiveNode) {
-                        reactiveNode.title = title;
-                        updateChatTitleOnServer(chatSessionId, title);
+                        if (session.title) {
+                            reactiveNode.title = session.title;
+                            updateChatTitleOnServer(chatSessionId, session.title);
+                        }
+                        reactiveNode.insertedAt = session.inserted_at ?? reactiveNode.insertedAt;
+                        reactiveNode.updatedAt = session.updated_at ?? reactiveNode.updatedAt;
                         persistCurrentWorkspace();
                     }
                 }
-                console.log('对话标题更新完成:', title);
+                console.log('对话标题更新完成:', session?.title);
             } catch (e) {
                 console.warn('[ChatTree] 获取自动归档的对话标题失败:', e);
             }
@@ -476,23 +499,27 @@ const handleTitleDetected = (event) => {
     }
 };
 
-// 递归收集树中所有 ChatNode
-const collectChatNodes = (node, result) => {
+// 递归收集树中所有可见的 ChatNode（仅遍历已展开的文件夹）
+const collectVisibleChatNodes = (node, result) => {
     if (node instanceof ChatNode) {
         result.push(node);
     } else if (node instanceof FolderNode) {
         for (const child of node.children) {
-            collectChatNodes(child, result);
+            if (child instanceof ChatNode) {
+                result.push(child);
+            } else if (child instanceof FolderNode && child.isOpen) {
+                collectVisibleChatNodes(child, result);
+            }
         }
     }
 };
 
-// 异步更新所有工作区中所有对话节点的标题
+// 异步更新当前可见的所有对话节点的标题
 const updateAllChatTitles = async () => {
     const chatNodes = [];
     for (const workspace of appState.workspaces) {
         if (!workspace.tree) continue;
-        collectChatNodes(workspace.tree, chatNodes);
+        collectVisibleChatNodes(workspace.tree, chatNodes);
     }
 
     if (chatNodes.length === 0) return;
@@ -503,13 +530,180 @@ const updateAllChatTitles = async () => {
         if (!sessionId) continue;
         try {
             const response = await fetchChatHistory(sessionId);
-            const title = response?.data?.biz_data?.chat_session?.title;
-            if (title && node.title !== title) {
-                node.title = title;
-                updateChatTitleOnServer(sessionId, title);
+            const session = response?.data?.biz_data?.chat_session;
+            if (session) {
+                if (session.title && node.title !== session.title) {
+                    node.title = session.title;
+                    updateChatTitleOnServer(sessionId, session.title);
+                }
+                node.insertedAt = session.inserted_at ?? node.insertedAt;
+                node.updatedAt = session.updated_at ?? node.updatedAt;
             }
         } catch (e) {
             // 单个对话获取失败时静默跳过
+        }
+    }
+};
+
+// 整理对话树：将过期日期文件夹从未分类迁移到历史，并聚合历史中的日期文件夹
+const organizeChatTree = () => {
+    // 解析 YYYY-MM-DD 格式的日期文件夹标题
+    const parseDateFolder = (folder) => {
+        if (!(folder instanceof FolderNode)) return null;
+        const match = folder.title.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return null;
+        return {
+            year: parseInt(match[1], 10),
+            month: parseInt(match[2], 10),
+            day: parseInt(match[3], 10),
+            folder
+        };
+    };
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const threeDaysAgo = new Date(today);
+    threeDaysAgo.setDate(today.getDate() - 3);
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth() + 1;
+
+    for (const workspace of appState.workspaces) {
+        const tree = workspace.tree;
+        if (!(tree instanceof FolderNode)) continue;
+
+        const uncategorized = tree.children.find(
+            child => child instanceof FolderNode && child.title === '未分类'
+        );
+        let history = tree.children.find(
+            child => child instanceof FolderNode && child.title === '历史'
+        );
+        if (!uncategorized && !history) continue;
+        if (!history) {
+            history = new FolderNode({ title: '历史', isEditing: false, isOpen: false });
+            const uIdx = tree.children.indexOf(uncategorized);
+            tree.children.splice(uIdx >= 0 ? uIdx + 1 : 0, 0, history);
+        }
+
+        // 1. 将未分类中超过3天的日期文件夹移入历史
+        if (uncategorized) {
+            const toMove = [];
+            for (const child of uncategorized.children) {
+                const parsed = parseDateFolder(child);
+                if (parsed) {
+                    const folderDate = new Date(parsed.year, parsed.month - 1, parsed.day);
+                    if (folderDate < threeDaysAgo) {
+                        toMove.push(child);
+                    }
+                }
+            }
+            for (const child of toMove) {
+                child.isOpen = false;
+                uncategorized.removeChild(child);
+                history.children.push(child);
+            }
+        }
+
+        // 2. 历史中：去年的日期文件夹移入年份文件夹，上个月的移入月份文件夹
+        //    先从历史直接子节点中收集日期文件夹（排除已有的月份/年份聚合文件夹）
+        const processHistoryLevel = (parentFolder, yearThreshold, monthThreshold) => {
+            const dateFolders = [];
+            const otherFolders = [];
+            for (const child of parentFolder.children) {
+                const parsed = parseDateFolder(child);
+                if (parsed) {
+                    dateFolders.push(parsed);
+                } else if (child instanceof FolderNode) {
+                    otherFolders.push(child);
+                }
+            }
+
+            // 先处理去年的：按年份聚合
+            const lastYearFolders = dateFolders.filter(p => p.year < yearThreshold);
+            const yearGroups = {};
+            for (const parsed of lastYearFolders) {
+                const yearKey = String(parsed.year);
+                if (!yearGroups[yearKey]) yearGroups[yearKey] = [];
+                yearGroups[yearKey].push(parsed.folder);
+            }
+            for (const [yearKey, folders] of Object.entries(yearGroups)) {
+                let yearFolder = parentFolder.children.find(
+                    child => child instanceof FolderNode && child.title === yearKey
+                );
+                if (!yearFolder) {
+                    yearFolder = new FolderNode({ title: yearKey, isEditing: false, isOpen: false });
+                    parentFolder.children.push(yearFolder);
+                }
+                for (const f of folders) {
+                    f.isOpen = false;
+                    parentFolder.removeChild(f);
+                    yearFolder.children.push(f);
+                }
+            }
+
+            // 再处理上个月的（但不是去年的）：按月份聚合
+            const lastMonthFolders = dateFolders.filter(p =>
+                p.year === yearThreshold && p.month < monthThreshold &&
+                !lastYearFolders.includes(p)
+            );
+            // 还要处理去年的上个月份
+            const prevYearMonthFolders = dateFolders.filter(p =>
+                p.year === yearThreshold - 1 && !lastYearFolders.includes(p)
+            );
+            const monthCandidates = [...lastMonthFolders, ...prevYearMonthFolders];
+            const monthGroups = {};
+            for (const parsed of monthCandidates) {
+                const monthKey = `${parsed.year}-${String(parsed.month).padStart(2, '0')}`;
+                if (!monthGroups[monthKey]) monthGroups[monthKey] = [];
+                monthGroups[monthKey].push(parsed.folder);
+            }
+            for (const [monthKey, folders] of Object.entries(monthGroups)) {
+                let monthFolder = parentFolder.children.find(
+                    child => child instanceof FolderNode && child.title === monthKey
+                );
+                if (!monthFolder) {
+                    monthFolder = new FolderNode({ title: monthKey, isEditing: false, isOpen: false });
+                    parentFolder.children.push(monthFolder);
+                }
+                for (const f of folders) {
+                    f.isOpen = false;
+                    parentFolder.removeChild(f);
+                    monthFolder.children.push(f);
+                }
+            }
+
+            // 递归处理已有的月份聚合文件夹：如果它的日期子文件夹现在属于更早的年份，不用动（已经在年份聚合中处理了）
+            // 但需要检查去年月份文件夹是否应该归入年份文件夹
+            for (const child of parentFolder.children) {
+                if (!(child instanceof FolderNode)) continue;
+                const monthMatch = child.title.match(/^(\d{4})-(\d{2})$/);
+                if (monthMatch) {
+                    const mYear = parseInt(monthMatch[1], 10);
+                    if (mYear < currentYear) {
+                        // 去年的月份文件夹，归入年份文件夹
+                        let yearFolder = parentFolder.children.find(
+                            c => c instanceof FolderNode && c.title === monthMatch[1]
+                        );
+                        if (!yearFolder) {
+                            yearFolder = new FolderNode({ title: monthMatch[1], isEditing: false, isOpen: false });
+                            parentFolder.children.push(yearFolder);
+                        }
+                        child.isOpen = false;
+                        parentFolder.removeChild(child);
+                        yearFolder.children.push(child);
+                    }
+                }
+            }
+        };
+
+        processHistoryLevel(history, currentYear, currentMonth);
+
+        // 3. 对历史中的年份文件夹，递归处理其内部的月份聚合
+        for (const child of history.children) {
+            if (!(child instanceof FolderNode)) continue;
+            const yearMatch = child.title.match(/^(\d{4})$/);
+            if (yearMatch) {
+                processHistoryLevel(child, currentYear, currentMonth);
+            }
         }
     }
 };
@@ -518,6 +712,8 @@ onMounted(() => {
     // 每次打开网页时，先获取远端工作区并应用，然后再加载
     fetchAndApplyWorkspaces().then(() => {
         loadWorkspace();
+        // 整理对话树：迁移过期日期文件夹
+        organizeChatTree();
         // 异步更新所有对话节点的标题
         updateAllChatTitles();
     });

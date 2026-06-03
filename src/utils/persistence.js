@@ -4,19 +4,21 @@ import { defaultSettings } from '../models/AppState.js';
 // 反序列化辅助函数
 function reviveNode(data) {
     if (data.children !== undefined) {
-        const folder = new FolderNode({ id: data.id, title: data.title, isEditing: false, isOpen: data.isOpen });
+        const folder = new FolderNode({ id: data.id, title: data.title, isEditing: false, isOpen: data.isOpen, insertedAt: data.insertedAt ?? null, updatedAt: data.updatedAt ?? null });
         folder.children = data.children.map(child => reviveNode(child));
         return folder;
     } else {
-        return new ChatNode({ id: data.id, title: data.title, url: data.url, isEditing: false });
+        return new ChatNode({ id: data.id, title: data.title, url: data.url, isEditing: false, insertedAt: data.insertedAt ?? null, updatedAt: data.updatedAt ?? null });
     }
 }
 
 function createDefaultWorkspace() {
+    const uncategorized = new FolderNode({ title: '未分类', isEditing: false, isOpen: true });
+    const history = new FolderNode({ title: '历史', isEditing: false, isOpen: false });
     return {
         id: `workspace_${Date.now()}`,
         name: '默认工作区',
-        tree: new FolderNode({ title: 'root', children: [] }),
+        tree: new FolderNode({ title: 'root', children: [uncategorized, history] }),
         settings: { skipDeleteConfirm: false },
         sidebarWidth: 335
     };
@@ -34,11 +36,54 @@ function normalizeSettings(settings = {}, legacySidebarWidth = 335) {
     };
 }
 
+function ensureUncategorized(tree) {
+    if (!(tree instanceof FolderNode)) return tree;
+    const hasUncategorized = tree.children.some(
+        child => child instanceof FolderNode && child.title === '未分类'
+    );
+    if (!hasUncategorized) {
+        tree.children.splice(0, 0, new FolderNode({ title: '未分类', isEditing: false, isOpen: true }));
+    }
+    const hasHistory = tree.children.some(
+        child => child instanceof FolderNode && child.title === '历史'
+    );
+    if (!hasHistory) {
+        // 历史排在未分类之后
+        const uncategorizedIdx = tree.children.findIndex(child => child instanceof FolderNode && child.title === '未分类');
+        const insertIdx = uncategorizedIdx >= 0 ? uncategorizedIdx + 1 : 0;
+        tree.children.splice(insertIdx, 0, new FolderNode({ title: '历史', isEditing: false, isOpen: false }));
+    }
+    return tree;
+}
+
+/** 递归折叠历史文件夹内的所有子文件夹 */
+function collapseHistoryFolders(tree) {
+    const historyNode = tree.children.find(
+        child => child instanceof FolderNode && child.title === '历史'
+    );
+    if (!historyNode) return;
+
+    const collapseRecursive = (node) => {
+        if (!(node instanceof FolderNode)) return;
+        node.isOpen = false;
+        for (const child of node.children) {
+            collapseRecursive(child);
+        }
+    };
+
+    for (const child of historyNode.children) {
+        collapseRecursive(child);
+    }
+}
+
 export function reviveWorkspace(item, fallbackName = '工作区') {
+    const tree = item.tree ? reviveNode(item.tree) : new FolderNode({ title: 'root', children: [] });
+    ensureUncategorized(tree);
+    collapseHistoryFolders(tree);
     return {
         id: item.id || `workspace_${Date.now()}`,
         name: item.name || fallbackName,
-        tree: item.tree ? reviveNode(item.tree) : new FolderNode({ title: 'root', children: [] }),
+        tree,
         folderPath: item.folderPath || null
     };
 }

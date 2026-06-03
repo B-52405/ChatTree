@@ -65,6 +65,7 @@
 import { defineProps, defineEmits } from 'vue';
 
 import { defaultSettings } from '../models/AppState.js';
+import { exportPersistedData } from '../utils/persistence.js';
 
 const props = defineProps({
     isOpen: Boolean,
@@ -103,22 +104,11 @@ const normalizeSyncServerPort = () => {
 const handleExport = () => {
     normalizeSyncServerPort();
 
-    // 导出整个脚本所有 GM_setValue 的数据
-    const allKeys = GM_listValues();
-    const allData = {};
-    for (const key of allKeys) {
-        try {
-            allData[key] = GM_getValue(key);
-        } catch (e) {
-            allData[key] = null;
-        }
-    }
-
-    const exportPayload = {
-        exportTime: new Date().toISOString(),
-        totalKeys: allKeys.length,
-        data: allData
-    };
+    const exportPayload = exportPersistedData(
+        props.workspaces,
+        props.currentWorkspaceId,
+        props.settings
+    );
 
     const jsonString = JSON.stringify(exportPayload, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });

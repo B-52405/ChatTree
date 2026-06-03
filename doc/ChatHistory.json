@@ -1,0 +1,80 @@
+﻿{
+    "code": 0,
+    "msg": "",
+    "data": {
+        "biz_code": 0,
+        "biz_msg": "",
+        "biz_data": {
+            "chat_session": {
+                "id": "<SESSION_ID>",
+                "title": "<TITLE>",
+                "title_type": "SYSTEM",
+                "model_type": "expert",
+                "pinned": false,
+                "updated_at": "<TIMESTAMP>",
+                "seq_id": "<SEQ_ID>",
+                "agent": "chat",
+                "version": 2,
+                "is_empty": false,
+                "current_message_id": 2,
+                "inserted_at": "<TIMESTAMP>"
+            },
+            "chat_messages": [
+                {
+                    "message_id": 1,
+                    "parent_id": null,
+                    "model": "",
+                    "role": "USER",
+                    "thinking_enabled": false,
+                    "ban_edit": false,
+                    "ban_regenerate": false,
+                    "status": "FINISHED",
+                    "incomplete_message": null,
+                    "accumulated_token_usage": "<TOKEN_COUNT>",
+                    "feedback": null,
+                    "inserted_at": "<TIMESTAMP>",
+                    "search_enabled": true,
+                    "fragments": [
+                        {
+                            "id": "<FRAGMENT_ID>",
+                            "type": "REQUEST",
+                            "content": "<USER_MESSAGE_CONTENT>"
+                        }
+                    ],
+                    "has_pending_fragment": false,
+                    "auto_continue": false,
+                    "search_triggered": false
+                },
+                {
+                    "message_id": 2,
+                    "parent_id": 1,
+                    "model": "",
+                    "role": "ASSISTANT",
+                    "thinking_enabled": false,
+                    "ban_edit": false,
+                    "ban_regenerate": false,
+                    "status": "FINISHED",
+                    "incomplete_message": null,
+                    "accumulated_token_usage": "<TOKEN_COUNT>",
+                    "feedback": null,
+                    "inserted_at": "<TIMESTAMP>",
+                    "search_enabled": true,
+                    "fragments": [
+                        {
+                            "id": "<FRAGMENT_ID>",
+                            "type": "RESPONSE",
+                            "content": "<ASSISTANT_MESSAGE_CONTENT>",
+                            "references": [],
+                            "stage_id": 1
+                        }
+                    ],
+                    "has_pending_fragment": false,
+                    "auto_continue": false,
+                    "search_triggered": false
+                }
+            ],
+            "cache_control": "REPLACE",
+            "cache_reset_at": "<TIMESTAMP>"
+        }
+    }
+}

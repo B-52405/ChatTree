@@ -66,6 +66,10 @@ export class FolderNode extends TreeNode {
         super(options);
         this.children = options.children || [];
         this.isOpen = options.isOpen !== undefined ? options.isOpen : true;
+        // Unix 时间戳（秒），表示文件夹的创建/最后修改时间
+        const now = Math.floor(Date.now() / 1000);
+        this.insertedAt = options.insertedAt ?? now;
+        this.updatedAt = options.updatedAt ?? now;
     }
 
     addChild(node) {
@@ -84,5 +88,8 @@ export class ChatNode extends TreeNode {
     constructor(options) {
         super(options);
         this.url = options.url || '';
+        // Unix 时间戳（秒），表示对话在 DeepSeek 服务器上的创建/最后编辑时间
+        this.insertedAt = options.insertedAt ?? null;
+        this.updatedAt = options.updatedAt ?? null;
     }
 }

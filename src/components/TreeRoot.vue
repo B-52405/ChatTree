@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick, watch } from 'vue';
+import { ref, computed, nextTick, watch } from 'vue';
 import TreeItem from './TreeItem.vue';
 import { FolderNode, ChatNode, state, findParent, findNodeByUrl, getAllParents, setFocus } from '../models/TreeNode.js';
 import { showNotify } from '../utils/notify.js';
@@ -14,6 +14,19 @@ const props = defineProps({
 
 const isRootDragOver = ref(false);
 const treeContainerRef = ref(null);
+
+// 分离"未分类"文件夹和"历史"文件夹及其他子节点
+const uncategorizedNode = computed(() => {
+    return props.model.children.find(child => child instanceof FolderNode && child.title === '未分类');
+});
+
+const historyNode = computed(() => {
+    return props.model.children.find(child => child instanceof FolderNode && child.title === '历史');
+});
+
+const otherChildren = computed(() => {
+    return props.model.children.filter(child => child !== uncategorizedNode.value && child !== historyNode.value);
+});
 
 const clearFocus = () => {
     setFocus(null);
@@ -46,8 +59,17 @@ const createNewFolder = () => {
     }
 
     const newFolder = new FolderNode({ title: '', isEditing: true });
-    targetFolder.addChild(newFolder);
-    targetFolder.isOpen = true; // 确保父文件夹展开
+    // 在根目录新建时插入到目录栏顶部（未分类和历史文件夹之后）
+    if (targetFolder === props.model) {
+        let insertIdx = 0;
+        if (uncategorizedNode.value) insertIdx++;
+        if (historyNode.value) insertIdx++;
+        targetFolder.children.splice(insertIdx, 0, newFolder);
+    } else {
+        // 在子文件夹中新建时插入到该文件夹顶部
+        targetFolder.children.splice(0, 0, newFolder);
+    }
+    targetFolder.isOpen = true;
     state.focusedNode = newFolder;
     state.focusedNodeDetachedFromUrl = false;
 };
@@ -119,12 +141,17 @@ const onRootDrop = (event) => {
             const doc = parser.parseFromString(html, 'text/html');
             const titleDiv = doc.querySelector('.c08e6e93');
             const title = titleDiv ? titleDiv.textContent.trim() : '未命名对话';
-            newNode = new ChatNode({ title, url });
+            const now = Math.floor(Date.now() / 1000);
+            newNode = new ChatNode({ title, url, insertedAt: now, updatedAt: now });
         }
     }
 
     if (newNode) {
-        props.model.addChild(newNode);
+        // 插入到目录栏顶部（未分类和历史文件夹之后）
+        let insertIdx = 0;
+        if (uncategorizedNode.value) insertIdx++;
+        if (historyNode.value) insertIdx++;
+        props.model.children.splice(insertIdx, 0, newNode);
         // 只有新创建的节点才改变焦点，拖拽的节点不改变焦点
         if (!state.draggedNode) {
             setFocus(newNode);
@@ -152,11 +179,22 @@ const onRootDrop = (event) => {
 
             <!-- 实际内容 -->
             <template v-else>
-                <ul class="root-tree" :class="{ 'drag-after': isRootDragOver }" v-if="model.children && model.children.length > 0">
-                    <TreeItem v-for="child in model.children" :key="child.id" :model="child" :parentNode="model" />
+                <!-- 置顶栏：未分类 -->
+                <ul v-if="uncategorizedNode" class="root-tree uncategorized-section">
+                    <TreeItem :model="uncategorizedNode" :parentNode="model" :isUncategorized="true" :isHistory="false" />
+                </ul>
+                <!-- 置顶栏：历史 -->
+                <ul v-if="historyNode" class="root-tree history-section">
+                    <TreeItem :model="historyNode" :parentNode="model" :isUncategorized="false" :isHistory="true" />
+                </ul>
+                <!-- 分割线 -->
+                <div v-if="uncategorizedNode || historyNode" class="divider"></div>
+                <!-- 目录栏 -->
+                <ul class="root-tree" :class="{ 'drag-after': isRootDragOver }" v-if="otherChildren.length > 0">
+                    <TreeItem v-for="child in otherChildren" :key="child.id" :model="child" :parentNode="model" />
                 </ul>
                 <div v-else class="empty-hint" :class="{ 'drag-into': isRootDragOver }" @click="createNewFolder">
-                    数据为空，点击或在此拖拽以创建内容
+                    数据为空，拖拽到此以创建内容
                 </div>
             </template>
         </div>
@@ -165,7 +203,7 @@ const onRootDrop = (event) => {
 
 <style scoped>
 .file-tree-container {
-    padding: 12px 8px 64px;
+    padding: 8px 6px 64px;
     overflow-y: auto;
     flex-grow: 1;
 }
@@ -183,6 +221,20 @@ const onRootDrop = (event) => {
     list-style-type: none;
     padding: 0;
     margin: 0;
+}
+
+.uncategorized-section {
+    margin-bottom: 4px;
+}
+
+.history-section {
+    margin-bottom: 4px;
+}
+
+.divider {
+    height: 1px;
+    background: #e2e8f0;
+    margin: 6px 4px 10px 4px;
 }
 
 .drag-after {
@@ -226,20 +278,20 @@ const onRootDrop = (event) => {
 .skeleton-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px;
+    gap: 6px;
+    padding: 3px;
 }
 
 .skeleton-icon {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
     border-radius: 4px;
     background: #e2e8f0;
     animation: pulse 1.5s infinite ease-in-out;
 }
 
 .skeleton-text {
-    height: 16px;
+    height: 14px;
     border-radius: 4px;
     background: #e2e8f0;
     animation: pulse 1.5s infinite ease-in-out;
@@ -269,6 +321,10 @@ const onRootDrop = (event) => {
     
     .skeleton-icon, .skeleton-text {
         background: #333;
+    }
+
+    .divider {
+        background: #3e3e3e;
     }
 }
 </style>
