@@ -1,4 +1,4 @@
-import { FolderNode, ChatNode } from '../models/TreeNode.js';
+import { FolderNode, ChatNode, findNodeByUrl } from '../models/TreeNode.js';
 import { defaultSettings } from '../models/AppState.js';
 
 // 反序列化辅助函数
@@ -160,4 +160,62 @@ export function exportPersistedData(workspaces, currentWorkspaceId, settings) {
         settings,
         exportTime: new Date().toISOString()
     };
+}
+
+/**
+ * 将 sourceTree 的节点合并到 targetTree 中。
+ * 规则：
+ *   - 同名文件夹递归合并
+ *   - ChatNode 按 url 去重（已存在则跳过）
+ *   - 不存在的文件夹和对话直接追加
+ */
+export function mergeTrees(targetTree, sourceTree) {
+    if (!(targetTree instanceof FolderNode) || !(sourceTree instanceof FolderNode)) return;
+    for (const sourceChild of sourceTree.children) {
+        if (sourceChild instanceof ChatNode) {
+            if (!findNodeByUrl(targetTree, sourceChild.url)) {
+                targetTree.addChild(sourceChild);
+            }
+        } else if (sourceChild instanceof FolderNode) {
+            const existingFolder = targetTree.children.find(
+                child => child instanceof FolderNode && child.title === sourceChild.title
+            );
+            if (existingFolder) {
+                mergeTrees(existingFolder, sourceChild);
+            } else {
+                targetTree.addChild(sourceChild);
+            }
+        }
+    }
+}
+
+/** 从导入数据中提取工作区数组（兼容新旧导出格式） */
+export function extractWorkspacesFromImport(data) {
+    let source = data;
+    if (data.data && data.data.chattree_data) {
+        source = data.data.chattree_data;
+    }
+    return Array.isArray(source.workspaces) ? source.workspaces : [source];
+}
+
+/** 生成不重复的工作区 ID */
+export function getUniqueWorkspaceId(baseId, existingIds) {
+    let id = baseId || `workspace_${Date.now()}`;
+    while (existingIds.has(id)) {
+        id = `workspace_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    }
+    return id;
+}
+
+/** 生成不重复的工作区名称 */
+export function getUniqueWorkspaceName(baseName, existingNames) {
+    const name = baseName || '导入工作区';
+    if (!existingNames.has(name)) return name;
+    let index = 2;
+    let nextName = `${name} (${index})`;
+    while (existingNames.has(nextName)) {
+        index += 1;
+        nextName = `${name} (${index})`;
+    }
+    return nextName;
 }

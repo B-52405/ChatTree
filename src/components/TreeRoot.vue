@@ -238,8 +238,19 @@ const onRootDrop = (event) => {
 }
 
 .drag-after {
-    border-bottom: 2px solid #007acc;
-    padding-bottom: 4px;
+    position: relative;
+}
+
+.drag-after::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #007acc;
+    pointer-events: none;
+    z-index: 1;
 }
 
 .drag-into {

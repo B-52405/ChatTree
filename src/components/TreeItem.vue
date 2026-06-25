@@ -583,14 +583,28 @@ const handleDownload = async () => {
     font-weight: bold;
 }
 
-.drag-before {
-    border-top: 2px solid #007acc;
-    padding-top: 4px;
+.drag-before::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #007acc;
+    pointer-events: none;
+    z-index: 1;
 }
 
-.drag-after {
-    border-bottom: 2px solid #007acc;
-    padding-bottom: 4px;
+.drag-after::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #007acc;
+    pointer-events: none;
+    z-index: 1;
 }
 
 .drag-into {
@@ -713,8 +727,8 @@ li {
         border-left-color: #555;
     }
 
-    .drag-before, .drag-after {
-        border-color: #3b82f6;
+    .drag-before::before, .drag-after::after {
+        background: #3b82f6;
     }
 
     .drag-into {

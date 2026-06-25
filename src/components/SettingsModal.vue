@@ -64,8 +64,18 @@
 <script setup>
 import { defineProps, defineEmits } from 'vue';
 
-import { defaultSettings } from '../models/AppState.js';
-import { exportPersistedData } from '../utils/persistence.js';
+import { defaultSettings, appState } from '../models/AppState.js';
+import {
+    exportPersistedData,
+    savePersistedData,
+    reviveWorkspace,
+    mergeTrees,
+    extractWorkspacesFromImport,
+    getUniqueWorkspaceId,
+    getUniqueWorkspaceName
+} from '../utils/persistence.js';
+import { showNotify } from '../utils/notify.js';
+import { updateWorkspaces } from '../utils/syncApi.js';
 
 const props = defineProps({
     isOpen: Boolean,
@@ -87,7 +97,7 @@ const props = defineProps({
     }
 });
 
-const emit = defineEmits(['close', 'export', 'import-merge', 'import-replace']);
+const emit = defineEmits(['close', 'export', 'workspace-changed']);
 
 const handleClose = () => {
     normalizeSyncServerPort();
@@ -144,15 +154,59 @@ const pickAndParseFile = () => new Promise((resolve, reject) => {
     input.click();
 });
 
+const pushWorkspacesUpdate = () => {
+    const dataToSave = {
+        workspaces: appState.workspaces.map(ws => ({ id: ws.id, name: ws.name, folderPath: ws.folderPath }))
+    };
+    updateWorkspaces(dataToSave).catch(e => console.error('更新工作区数据失败:', e));
+};
+
 const handleImportMerge = async () => {
     normalizeSyncServerPort();
     if (!confirm('合并导入将保留现有数据，重名工作区/文件夹会合并，相同URL的对话将被跳过。\n\n确定要继续吗？')) return;
     try {
         const data = await pickAndParseFile();
-        emit('import-merge', data);
+        const sourceWorkspaces = extractWorkspacesFromImport(data);
+        if (sourceWorkspaces.length === 0) {
+            showNotify('未找到可导入的工作区。', 'warning');
+            return;
+        }
+
+        const existingNames = new Set(appState.workspaces.map(ws => ws.name.trim()));
+        const existingIds = new Set(appState.workspaces.map(ws => ws.id));
+        let mergedCount = 0;
+        let newCount = 0;
+
+        for (const sourceWs of sourceWorkspaces) {
+            if (!sourceWs || typeof sourceWs !== 'object') continue;
+            const sourceName = (sourceWs.name || '').trim();
+            const existingWs = appState.workspaces.find(ws => ws.name.trim() === sourceName);
+            if (existingWs) {
+                const sourceTree = reviveWorkspace(sourceWs).tree;
+                mergeTrees(existingWs.tree, sourceTree);
+                mergedCount++;
+            } else {
+                const newWs = reviveWorkspace(sourceWs);
+                newWs.id = getUniqueWorkspaceId(newWs.id, existingIds);
+                existingIds.add(newWs.id);
+                newWs.name = getUniqueWorkspaceName(newWs.name, existingNames);
+                existingNames.add(newWs.name.trim());
+                appState.workspaces.push(newWs);
+                newCount++;
+            }
+        }
+
+        savePersistedData(appState.workspaces, appState.currentWorkspaceId, appState.settings);
+        pushWorkspacesUpdate();
+
+        const parts = [];
+        if (mergedCount > 0) parts.push(`${mergedCount} 个合并`);
+        if (newCount > 0) parts.push(`${newCount} 个新增`);
+        showNotify(`导入完成：${parts.join('，')}。`, 'success');
     } catch (e) {
         if (e.message !== '未选择文件') {
-            console.error('导入文件解析失败:', e);
+            console.error('合并导入失败：', e);
+            showNotify('导入失败，请确认文件格式正确。', 'error');
         }
     }
 };
@@ -162,10 +216,31 @@ const handleImportReplace = async () => {
     if (!confirm('替换导入将清空所有现有数据，用导入文件完全替换。\n\n此操作不可撤销，确定要继续吗？')) return;
     try {
         const data = await pickAndParseFile();
-        emit('import-replace', data);
+        const sourceWorkspaces = extractWorkspacesFromImport(data);
+        if (sourceWorkspaces.length === 0) {
+            showNotify('未找到可导入的工作区。', 'warning');
+            return;
+        }
+
+        const importedWorkspaces = sourceWorkspaces
+            .filter(item => item && typeof item === 'object')
+            .map(item => reviveWorkspace(item));
+
+        if (importedWorkspaces.length === 0) {
+            showNotify('未找到可导入的工作区。', 'warning');
+            return;
+        }
+
+        appState.workspaces = importedWorkspaces;
+        appState.currentWorkspaceId = importedWorkspaces[0].id;
+        savePersistedData(appState.workspaces, appState.currentWorkspaceId, appState.settings);
+        pushWorkspacesUpdate();
+        emit('workspace-changed', importedWorkspaces[0].tree);
+        showNotify(`已替换为 ${importedWorkspaces.length} 个工作区。`, 'success');
     } catch (e) {
         if (e.message !== '未选择文件') {
-            console.error('导入文件解析失败:', e);
+            console.error('替换导入失败：', e);
+            showNotify('导入失败，请确认文件格式正确。', 'error');
         }
     }
 };

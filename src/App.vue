@@ -8,7 +8,7 @@ import SettingsModal from './components/SettingsModal.vue';
 import WorkspaceManager from './components/WorkspaceManager.vue';
 import { FolderNode, ChatNode, state, findNodeByUrl, getAllParents, setFocus } from './models/TreeNode.js';
 import { appState } from './models/AppState.js';
-import { loadPersistedData, savePersistedData, reviveWorkspace } from './utils/persistence.js';
+import { loadPersistedData, savePersistedData, reviveWorkspace, getUniqueWorkspaceId, getUniqueWorkspaceName } from './utils/persistence.js';
 import { getWorkspaces, updateWorkspaces, getTree, updateTree } from './utils/syncApi.js';
 import { showNotify } from './utils/notify.js';
 import { getSessionIdFromUrl, fetchChatHistory, updateChatTitleOnServer } from './utils/apiHooks.js';
@@ -166,26 +166,6 @@ const deleteWorkspace = (workspaceId) => {
     pushWorkspacesUpdate();
 };
 
-const getUniqueWorkspaceId = (baseId, existingIds = new Set(appState.workspaces.map(workspace => workspace.id))) => {
-    let id = baseId || `workspace_${Date.now()}`;
-    while (existingIds.has(id)) {
-        id = `workspace_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    }
-    return id;
-};
-
-const getUniqueWorkspaceName = (baseName, existingNames = new Set(appState.workspaces.map(workspace => workspace.name.trim()))) => {
-    const name = baseName || '导入工作区';
-    if (!existingNames.has(name)) return name;
-    let index = 2;
-    let nextName = `${name} (${index})`;
-    while (existingNames.has(nextName)) {
-        index += 1;
-        nextName = `${name} (${index})`;
-    }
-    return nextName;
-};
-
 const readFileAsText = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -236,126 +216,6 @@ const importWorkspace = () => {
         }
     };
     input.click();
-};
-
-/**
- * 将 sourceTree 的节点合并到 targetTree 中。
- * 规则：
- *   - 同名文件夹递归合并
- *   - ChatNode 按 url 去重（已存在则跳过）
- *   - 不存在的文件夹和对话直接追加
- */
-const mergeTrees = (targetTree, sourceTree) => {
-    if (!(targetTree instanceof FolderNode) || !(sourceTree instanceof FolderNode)) return;
-    for (const sourceChild of sourceTree.children) {
-        if (sourceChild instanceof ChatNode) {
-            // 跳过相同 url 的对话
-            if (!findNodeByUrl(targetTree, sourceChild.url)) {
-                targetTree.addChild(sourceChild);
-            }
-        } else if (sourceChild instanceof FolderNode) {
-            const existingFolder = targetTree.children.find(
-                child => child instanceof FolderNode && child.title === sourceChild.title
-            );
-            if (existingFolder) {
-                mergeTrees(existingFolder, sourceChild);
-            } else {
-                targetTree.addChild(sourceChild);
-            }
-        }
-    }
-};
-
-/** 从导入数据中提取工作区数组 */
-const extractWorkspacesFromImport = (data) => {
-    // 新导出格式：{ data: { chattree_data: { workspaces: [...] } } }
-    let source = data;
-    if (data.data && data.data.chattree_data) {
-        source = data.data.chattree_data;
-    }
-    return Array.isArray(source.workspaces) ? source.workspaces : [source];
-};
-
-/** 合并导入：保留现有数据，重名工作区/文件夹合并，跳过相同URL对话 */
-const handleImportMerge = (data) => {
-    try {
-        const sourceWorkspaces = extractWorkspacesFromImport(data);
-        if (sourceWorkspaces.length === 0) {
-            showNotify('未找到可导入的工作区。', 'warning');
-            return;
-        }
-
-        const existingNames = new Set(appState.workspaces.map(ws => ws.name.trim()));
-        const existingIds = new Set(appState.workspaces.map(ws => ws.id));
-        let mergedCount = 0;
-        let newCount = 0;
-
-        for (const sourceWs of sourceWorkspaces) {
-            if (!sourceWs || typeof sourceWs !== 'object') continue;
-            const sourceName = (sourceWs.name || '').trim();
-
-            // 查找同名工作区
-            const existingWs = appState.workspaces.find(ws => ws.name.trim() === sourceName);
-            if (existingWs) {
-                // 合并树
-                const sourceTree = reviveWorkspace(sourceWs).tree;
-                mergeTrees(existingWs.tree, sourceTree);
-                mergedCount++;
-            } else {
-                // 作为新工作区添加
-                const newWs = reviveWorkspace(sourceWs);
-                newWs.id = getUniqueWorkspaceId(newWs.id, existingIds);
-                existingIds.add(newWs.id);
-                newWs.name = getUniqueWorkspaceName(newWs.name, existingNames);
-                existingNames.add(newWs.name.trim());
-                appState.workspaces.push(newWs);
-                newCount++;
-            }
-        }
-
-        persistCurrentWorkspace();
-        savePersistedData(appState.workspaces, appState.currentWorkspaceId, appState.settings);
-        pushWorkspacesUpdate();
-
-        const parts = [];
-        if (mergedCount > 0) parts.push(`${mergedCount} 个合并`);
-        if (newCount > 0) parts.push(`${newCount} 个新增`);
-        showNotify(`导入完成：${parts.join('，')}。`, 'success');
-    } catch (e) {
-        console.error('合并导入失败：', e);
-        showNotify('导入失败，请确认文件格式正确。', 'error');
-    }
-};
-
-/** 替换导入：清空现有数据，用导入数据完全替换 */
-const handleImportReplace = (data) => {
-    try {
-        const sourceWorkspaces = extractWorkspacesFromImport(data);
-        if (sourceWorkspaces.length === 0) {
-            showNotify('未找到可导入的工作区。', 'warning');
-            return;
-        }
-
-        const importedWorkspaces = sourceWorkspaces
-            .filter(item => item && typeof item === 'object')
-            .map(item => reviveWorkspace(item));
-
-        if (importedWorkspaces.length === 0) {
-            showNotify('未找到可导入的工作区。', 'warning');
-            return;
-        }
-
-        persistCurrentWorkspace();
-        appState.workspaces = importedWorkspaces;
-        appState.currentWorkspaceId = importedWorkspaces[0].id;
-        treeData.value = importedWorkspaces[0].tree;
-        savePersistedData(appState.workspaces, appState.currentWorkspaceId, appState.settings);
-        pushWorkspacesUpdate();
-        showNotify(`已替换为 ${importedWorkspaces.length} 个工作区。`, 'success');
-    } catch (e) {
-        console.error('替换导入失败：', e);
-        showNotify('导入失败，请确认文件格式正确。', 'error');
-    }
 };
 
 const onMouseDown = () => {
@@ -560,6 +420,15 @@ const organizeChatTree = () => {
         };
     };
 
+    // 按标题字符串降序插入：越新的日期/年份/月份越靠上
+    const insertSortedDesc = (parent, child) => {
+        let i = 0;
+        while (i < parent.children.length && parent.children[i].title > child.title) {
+            i++;
+        }
+        parent.children.splice(i, 0, child);
+    };
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const threeDaysAgo = new Date(today);
@@ -584,7 +453,7 @@ const organizeChatTree = () => {
             tree.children.splice(uIdx >= 0 ? uIdx + 1 : 0, 0, history);
         }
 
-        // 1. 将未分类中超过3天的日期文件夹移入历史
+        // 1. 将未分类中超过3天的日期文件夹移入历史，空文件夹直接删除
         if (uncategorized) {
             const toMove = [];
             for (const child of uncategorized.children) {
@@ -597,9 +466,13 @@ const organizeChatTree = () => {
                 }
             }
             for (const child of toMove) {
-                child.isOpen = false;
                 uncategorized.removeChild(child);
-                history.children.push(child);
+                if (child.children.length === 0) {
+                    // 空日期文件夹直接丢弃
+                    continue;
+                }
+                child.isOpen = false;
+                insertSortedDesc(history, child);
             }
         }
 
@@ -631,12 +504,12 @@ const organizeChatTree = () => {
                 );
                 if (!yearFolder) {
                     yearFolder = new FolderNode({ title: yearKey, isEditing: false, isOpen: false });
-                    parentFolder.children.push(yearFolder);
+                    insertSortedDesc(parentFolder, yearFolder);
                 }
                 for (const f of folders) {
                     f.isOpen = false;
                     parentFolder.removeChild(f);
-                    yearFolder.children.push(f);
+                    insertSortedDesc(yearFolder, f);
                 }
             }
 
@@ -662,12 +535,12 @@ const organizeChatTree = () => {
                 );
                 if (!monthFolder) {
                     monthFolder = new FolderNode({ title: monthKey, isEditing: false, isOpen: false });
-                    parentFolder.children.push(monthFolder);
+                    insertSortedDesc(parentFolder, monthFolder);
                 }
                 for (const f of folders) {
                     f.isOpen = false;
                     parentFolder.removeChild(f);
-                    monthFolder.children.push(f);
+                    insertSortedDesc(monthFolder, f);
                 }
             }
 
@@ -685,11 +558,11 @@ const organizeChatTree = () => {
                         );
                         if (!yearFolder) {
                             yearFolder = new FolderNode({ title: monthMatch[1], isEditing: false, isOpen: false });
-                            parentFolder.children.push(yearFolder);
+                            insertSortedDesc(parentFolder, yearFolder);
                         }
                         child.isOpen = false;
                         parentFolder.removeChild(child);
-                        yearFolder.children.push(child);
+                        insertSortedDesc(yearFolder, child);
                     }
                 }
             }
@@ -776,8 +649,7 @@ onUnmounted(() => {
         :currentWorkspaceId="appState.currentWorkspaceId"
         @close="appState.isSettingsOpen = false"
         @export="() => {}"
-        @import-merge="handleImportMerge"
-        @import-replace="handleImportReplace"
+        @workspace-changed="newTree => treeData = newTree"
     />
 
     <div class="bct-wrapper" :style="{ width: `${appState.settings.sidebarWidth}px` }">

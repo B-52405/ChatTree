@@ -73,7 +73,8 @@ export class FolderNode extends TreeNode {
     }
 
     addChild(node) {
-        this.children.push(node);
+        // 默认插入到顶部，统一各处的添加行为
+        this.children.unshift(node);
     }
     
     removeChild(node) {
